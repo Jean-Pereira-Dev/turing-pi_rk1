@@ -3,33 +3,33 @@
 Automated build system for [Armbian](https://github.com/armbian/build) images and
 kernel packages targeting the **Turing Pi RK1** compute module (Rockchip RK3588S).
 
-All builds run on a **self-hosted Linux runner** and always execute **inside Docker**
-(via Armbian's built-in Docker mode), so the host stays clean.
+All jobs run on a **self-hosted Linux runner** inside the **official Armbian Docker
+container**, keeping the runner host clean and the build environment fully reproducible.
 
 ## What Gets Built
 
-| Artifact | Trigger | Distribution |
+| Artifact | Trigger | Published to |
 |----------|---------|--------------|
-| Full OS image (`.img.xz`) | Monthly — 1st of each month at 02:00 UTC | GitHub Release (tagged `image-YYYY-MM`) |
-| Kernel packages (`.deb`) | Daily check — builds when a new stable kernel is found on kernel.org | APT repository on GitHub Pages |
+| Full OS image (`.img.xz`) | Monthly — 1st of each month at 02:00 UTC | GitHub Release (tag `image-YYYY-MM`) |
+| Kernel packages (`.deb`) | Daily check — builds when kernel.org has a newer stable version | APT repository on GitHub Pages |
 
 ---
 
 ## APT Repository
 
-Kernel packages are published as an APT repository at:
+Kernel packages are available as a Debian APT repository at:
 
 ```
 https://Jean-Pereira-Dev.github.io/turing-pi_rk1
 ```
 
-> **Note:** Enable GitHub Pages on the `gh-pages` branch of this repository before
-> the first kernel build runs (Settings → Pages → Branch: `gh-pages` / `root`).
+> **First-time setup:** Enable GitHub Pages on the `gh-pages` branch before the
+> first kernel build runs (Settings → Pages → Branch: `gh-pages` / root).
 
-> **Fork note:** If you fork this repository, replace `Jean-Pereira-Dev` with your
-> GitHub username/organisation in the `deb` line below and in your sources list.
+> **Fork note:** Replace `Jean-Pereira-Dev` with your own GitHub username if you
+> fork this repository.
 
-### Add to your Turing Pi RK1
+### Add the repository
 
 ```bash
 echo "deb [trusted=yes] https://Jean-Pereira-Dev.github.io/turing-pi_rk1 bookworm main" \
@@ -37,7 +37,7 @@ echo "deb [trusted=yes] https://Jean-Pereira-Dev.github.io/turing-pi_rk1 bookwor
 sudo apt update
 ```
 
-### Install the latest kernel
+### Install the kernel
 
 ```bash
 sudo apt install linux-image-edge-rockchip64 \
@@ -46,8 +46,8 @@ sudo apt install linux-image-edge-rockchip64 \
 sudo reboot
 ```
 
-The repository always keeps the **two most recent kernel versions**. Older versions
-are automatically pruned after each successful build.
+The repository always keeps the **two most recent kernel versions**; older versions
+are pruned automatically after each successful build.
 
 ---
 
@@ -55,51 +55,51 @@ are automatically pruned after each successful build.
 
 ### [`build-image.yml`](.github/workflows/build-image.yml) — Monthly Image Build
 
-Clones the upstream Armbian build system fresh on every run, copies the local
-`userpatches/` directory into it, and compiles a complete bootable OS image inside
-Docker (via `compile.sh docker`).
+Builds a complete bootable Armbian OS image for the Turing Pi RK1.
 
-Published as a GitHub Release tagged `image-YYYY-MM`.
+The job runs inside `ghcr.io/armbian/docker-armbian-build:armbian-ubuntu-jammy-latest`
+(declared via the workflow `container:` key). Armbian's `compile.sh` detects the
+container environment and builds natively without spawning a nested container.
+The finished image is published as a GitHub Release tagged `image-YYYY-MM`.
 
-**Manual trigger:** Go to *Actions → Build Armbian Image (Monthly) → Run workflow*
-and optionally override the kernel branch (`current`, `edge`, `vendor`) and OS
-release (`noble`, `jammy`).
+**Manual trigger:** *Actions → Build Armbian Image (Monthly) → Run workflow*.
+Optional overrides: kernel branch (`current`, `edge`, `vendor`) and OS release
+(`noble`, `jammy`).
 
 ### [`build-kernel.yml`](.github/workflows/build-kernel.yml) — Daily Kernel Check & Build
 
-Runs daily. The pipeline has three sequential jobs:
+Checks for new upstream kernels every day. The pipeline has three sequential jobs:
 
-| Job | What it does |
-|-----|-------------|
-| `check-kernel-version` | Fetches the latest stable version from [kernel.org](https://www.kernel.org/releases.json), compares it with `latest-kernel.txt` in the APT repo, decides whether to build |
-| `build-kernel` | Clones Armbian, copies userpatches, builds kernel `.deb` packages inside Docker |
-| `publish-apt-repo` | Downloads the new packages, adds them to `pool/main/`, prunes kernels older than the 2 most recent, regenerates `Packages`/`Release` metadata, pushes to the `gh-pages` branch |
+| Job | Container | What it does |
+|-----|-----------|-------------|
+| `check-kernel-version` | runner host | Fetches the latest stable version from [kernel.org](https://www.kernel.org/releases.json), compares it with `latest-kernel.txt` published in the APT repo |
+| `build-kernel` | Armbian build image | Clones Armbian, overlays `userpatches/`, builds kernel `.deb` packages |
+| `publish-apt-repo` | `ubuntu:22.04` | Downloads new packages, updates `pool/main/`, prunes to 2 latest versions, regenerates `Packages`/`Release` metadata, pushes to `gh-pages` |
 
-**Manual trigger:** Go to *Actions → Build Kernel (Check Daily for New Versions) →
-Run workflow*. Set *Force build* to `true` to build unconditionally.
+**Manual trigger:** *Actions → Build Kernel (Check Daily for New Versions) → Run workflow*.
+Set *Force build* to `true` to build unconditionally.
 
 ---
 
 ## Runner Requirements
 
-The self-hosted runner must have:
-
 | Requirement | Notes |
 |-------------|-------|
 | Linux (x86-64) | Ubuntu 22.04+ recommended |
-| Docker | Runner user must be in the `docker` group |
-| `git`, `curl`, `python3` | For the check-kernel-version job |
-| `dpkg-dev` (or `sudo apt-get install dpkg-dev`) | For generating APT metadata; auto-installed if missing |
-| ~30 GB free disk space | For Armbian build artifacts |
+| Docker | The runner user must be in the `docker` group |
+| `curl`, `python3` | Used by `check-kernel-version` on the runner host |
+| ~30 GB free disk space | For Armbian build output |
 
-Armbian's `compile.sh docker` automatically pulls/updates its own build container,
-so no Armbian-specific dependencies are needed on the host.
+`build-kernel` and `build-image` jobs pull the Armbian build container automatically
+on first use. `publish-apt-repo` uses a standard `ubuntu:22.04` container and
+installs `dpkg-dev` and `git` via `apt-get` at the start of the job.
 
 ---
 
 ## Customising the Kernel
 
-Custom patches and kernel config overrides live under `userpatches/`:
+Drop `.patch` files into the appropriate `userpatches/kernel/` subdirectory.
+Patches are applied on top of Armbian's built-in set in lexicographic order.
 
 ```
 userpatches/
@@ -110,15 +110,11 @@ userpatches/
         └── README.md
 ```
 
-Drop `.patch` files into the appropriate directory. They are applied on top of
-Armbian's built-in patch set in lexicographic order. See the README inside each
-directory for guidance.
-
 ---
 
 ## Building Locally
 
-Prerequisites: Ubuntu 22.04+ host, Docker, `git`, ~30 GB free disk space.
+Prerequisites: Docker installed, `git`, ~30 GB free disk space.
 
 ```bash
 # Clone this repo
@@ -131,13 +127,18 @@ git clone --depth=1 https://github.com/armbian/build.git armbian-build
 # Copy userpatches
 cp -r userpatches armbian-build/
 
-# Build full image (current branch, Ubuntu Noble) — inside Docker
-cd armbian-build
-./compile.sh docker BOARD=turing-rk1 BRANCH=current RELEASE=noble \
-  BUILD_MINIMAL=no BUILD_DESKTOP=no KERNEL_CONFIGURE=no
+# Build full image (current branch, Ubuntu Noble)
+docker run --rm --privileged \
+  -v "$(pwd)/armbian-build:/armbian" \
+  ghcr.io/armbian/docker-armbian-build:armbian-ubuntu-jammy-latest \
+  bash -c "cd /armbian && ./compile.sh BOARD=turing-rk1 BRANCH=current RELEASE=noble \
+    BUILD_MINIMAL=no BUILD_DESKTOP=no KERNEL_CONFIGURE=no COMPRESS_OUTPUTIMAGE=sha,xz"
 
-# Build kernel packages only (edge branch) — inside Docker
-./compile.sh docker kernel BOARD=turing-rk1 BRANCH=edge KERNEL_CONFIGURE=no
+# Build kernel packages only (edge branch)
+docker run --rm --privileged \
+  -v "$(pwd)/armbian-build:/armbian" \
+  ghcr.io/armbian/docker-armbian-build:armbian-ubuntu-jammy-latest \
+  bash -c "cd /armbian && ./compile.sh kernel BOARD=turing-rk1 BRANCH=edge KERNEL_CONFIGURE=no"
 ```
 
 Output images land in `armbian-build/output/images/`.  

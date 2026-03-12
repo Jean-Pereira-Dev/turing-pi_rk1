@@ -1,8 +1,14 @@
 name: Build Armbian Image (Monthly)
 
+# Builds a complete Armbian OS image for the Turing Pi RK1 module once a month
+# (or on demand). The image is published as a GitHub Release.
+#
+# The job runs inside the official Armbian build container so that all build
+# dependencies are self-contained and the runner host stays clean.
+
 on:
   schedule:
-    # Run at 02:00 UTC on the 1st of every month
+    # 02:00 UTC on the 1st of every month
     - cron: '0 2 1 * *'
   workflow_dispatch:
     inputs:
@@ -30,8 +36,13 @@ permissions: {}
 jobs:
   build-image:
     name: Build Armbian Image for Turing Pi RK1
-    # Runs on your self-hosted Linux runner with Docker available
     runs-on: self-hosted
+    # Run the entire job inside the official Armbian build container.
+    # compile.sh detects the Docker environment (/.dockerenv) and builds natively
+    # without spawning a nested container, so no 'docker' subcommand is needed.
+    container:
+      image: ghcr.io/armbian/docker-armbian-build:armbian-ubuntu-jammy-latest
+      options: --privileged
     permissions:
       contents: write
 
@@ -42,18 +53,17 @@ jobs:
       - name: Clone Armbian build system
         run: |
           git clone --depth=1 https://github.com/armbian/build.git armbian-build
-          echo "Armbian cloned at commit: $(git -C armbian-build rev-parse HEAD)"
+          echo "Armbian commit: $(git -C armbian-build rev-parse HEAD)"
 
       - name: Copy userpatches into Armbian build tree
         run: |
           cp -r userpatches armbian-build/
-          echo "Userpatches copied:"
           find armbian-build/userpatches -type f | sort
 
-      - name: Build Armbian image (inside Docker via compile.sh)
+      - name: Build Armbian image
         run: |
           cd armbian-build
-          ./compile.sh docker \
+          ./compile.sh \
             BOARD="${{ env.BOARD }}" \
             BRANCH="${{ env.BRANCH }}" \
             RELEASE="${{ env.RELEASE }}" \
@@ -65,10 +75,8 @@ jobs:
 
       - name: List build output
         run: |
-          echo "=== Images ==="
           ls -lh armbian-build/output/images/ || echo "(no images)"
-          echo "=== Debs ==="
-          ls -lh armbian-build/output/debs/ || echo "(no debs)"
+          ls -lh armbian-build/output/debs/   || echo "(no debs)"
 
       - name: Upload image as workflow artifact
         uses: actions/upload-artifact@v4
@@ -79,12 +87,11 @@ jobs:
             armbian-build/output/images/*.img.xz.sha
           retention-days: 30
 
-      - name: Determine image release tag
+      - name: Determine monthly release tag
         id: tag
         run: |
           TAG="image-$(date +%Y-%m)"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Using release tag: $TAG"
 
       - name: Create or update monthly GitHub Release
         uses: softprops/action-gh-release@v2
@@ -104,10 +111,9 @@ jobs:
 
             ## Installation
 
-            1. Flash the `.img.xz` image to an eMMC or SD card using [balenaEtcher](https://etcher.io) or `dd`.
+            1. Flash the `.img.xz` file to an eMMC or SD card using [balenaEtcher](https://etcher.io) or `dd`.
             2. Insert into the Turing Pi RK1 module and power on.
 
-            ### Verify Checksum
             ```bash
             sha256sum -c *.img.xz.sha
             ```

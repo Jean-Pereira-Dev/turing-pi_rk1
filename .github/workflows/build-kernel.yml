@@ -1,34 +1,44 @@
 name: Build Kernel (Check Daily for New Versions)
 
+# Runs daily to detect new upstream kernel versions. When a new version is found
+# the pipeline builds Armbian kernel packages and publishes them to the APT
+# repository hosted on GitHub Pages.
+#
+# Pipeline overview:
+#   1. check-kernel-version  — compare kernel.org against the published APT repo
+#   2. build-kernel          — build .deb packages inside the Armbian container
+#   3. publish-apt-repo      — update the gh-pages APT repo (keeps 2 latest kernels)
+
 on:
   schedule:
-    # Check kernel.org daily at 06:00 UTC
+    # Check for a new kernel every day at 06:00 UTC
     - cron: '0 6 * * *'
   workflow_dispatch:
     inputs:
       force_build:
-        description: 'Force kernel build even if no new version detected'
+        description: 'Force build even if no new version found (true/false)'
         required: false
         default: 'false'
       kernel_branch:
-        description: 'Armbian kernel branch to build (current, edge)'
+        description: 'Armbian kernel branch (current, edge)'
         required: false
         default: 'edge'
 
 env:
   BOARD: turing-rk1
   KERNEL_BRANCH: ${{ github.event.inputs.kernel_branch || 'edge' }}
-  # GitHub Pages URL for this repository's APT repository
+  # URL where GitHub Pages serves the gh-pages branch of this repository
   PAGES_URL: https://${{ github.repository_owner }}.github.io/turing-pi_rk1
 
 permissions: {}
 
 jobs:
-  # ──────────────────────────────────────────────────────────────────────────
-  # 1. Check kernel.org for new stable releases
-  # ──────────────────────────────────────────────────────────────────────────
+
+  # ---------------------------------------------------------------------------
+  # Job 1 — Check whether a new kernel version is available
+  # ---------------------------------------------------------------------------
   check-kernel-version:
-    name: Check for New Kernel Version on kernel.org
+    name: Check for New Kernel Version
     runs-on: self-hosted
     permissions:
       contents: read
@@ -37,17 +47,17 @@ jobs:
       kernel_version: ${{ steps.check.outputs.kernel_version }}
 
     steps:
-      - name: Fetch latest stable kernel version from kernel.org
+      - name: Compare kernel.org against last published version
         id: check
         run: |
-          # Retrieve latest stable kernel version from kernel.org JSON feed
+          # Fetch the list of current releases from kernel.org
           KERNEL_JSON=$(curl -fsSL https://www.kernel.org/releases.json)
 
+          # Pick the latest stable release, falling back to longterm if needed
           LATEST_VERSION=$(echo "$KERNEL_JSON" | python3 -c "
           import sys, json
           data = json.load(sys.stdin)
           releases = data.get('releases', [])
-          # Prefer 'stable', fall back to 'longterm'
           for moniker in ('stable', 'longterm'):
               candidates = [r for r in releases if r.get('moniker') == moniker]
               if candidates:
@@ -60,37 +70,42 @@ jobs:
             exit 1
           fi
 
-          echo "Latest kernel.org version: $LATEST_VERSION"
+          echo "Latest upstream kernel : $LATEST_VERSION"
           echo "kernel_version=$LATEST_VERSION" >> "$GITHUB_OUTPUT"
 
-          # Read the last built version from the APT repo marker file on GitHub Pages.
-          # Falls back to "none" if the file doesn't exist yet (first run).
+          # Read the version that was last published to the APT repo.
+          # latest-kernel.txt is written by publish-apt-repo and served via GitHub Pages.
+          # Falls back to "none" on the very first run before anything has been published.
           LAST_BUILT=$(curl -fsSL "${{ env.PAGES_URL }}/latest-kernel.txt" 2>/dev/null \
             | tr -d '[:space:]' || echo "none")
 
-          echo "Last built kernel version: $LAST_BUILT"
+          echo "Last published kernel  : $LAST_BUILT"
 
-          # Decide whether to build
           if [ "${{ github.event.inputs.force_build }}" = "true" ]; then
-            echo "Force build requested — triggering build."
+            echo "Force-build requested."
             echo "should_build=true" >> "$GITHUB_OUTPUT"
           elif [ "$LATEST_VERSION" != "$LAST_BUILT" ]; then
-            echo "New kernel detected ($LATEST_VERSION vs $LAST_BUILT) — triggering build."
+            echo "New version found — scheduling build."
             echo "should_build=true" >> "$GITHUB_OUTPUT"
           else
-            echo "No new kernel version ($LATEST_VERSION). Skipping build."
+            echo "Already up to date — skipping build."
             echo "should_build=false" >> "$GITHUB_OUTPUT"
           fi
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # 2. Build kernel packages using Armbian (always inside Docker)
-  # ──────────────────────────────────────────────────────────────────────────
+  # ---------------------------------------------------------------------------
+  # Job 2 — Build kernel .deb packages
+  # ---------------------------------------------------------------------------
   build-kernel:
-    name: Build Kernel Packages for Turing Pi RK1
+    name: Build Kernel Packages
     needs: check-kernel-version
     if: needs.check-kernel-version.outputs.should_build == 'true'
-    # Runs on your self-hosted Linux runner with Docker available
     runs-on: self-hosted
+    # Run inside the official Armbian build container.
+    # compile.sh detects the Docker environment (/.dockerenv) and builds natively
+    # without spawning a nested container, so no 'docker' subcommand is needed.
+    container:
+      image: ghcr.io/armbian/docker-armbian-build:armbian-ubuntu-jammy-latest
+      options: --privileged
     permissions:
       contents: read
 
@@ -101,49 +116,53 @@ jobs:
       - name: Clone Armbian build system
         run: |
           git clone --depth=1 https://github.com/armbian/build.git armbian-build
-          echo "Armbian cloned at commit: $(git -C armbian-build rev-parse HEAD)"
+          echo "Armbian commit: $(git -C armbian-build rev-parse HEAD)"
 
       - name: Copy userpatches into Armbian build tree
-        run: |
-          cp -r userpatches armbian-build/
-          echo "Userpatches copied:"
-          find armbian-build/userpatches -type f | sort
+        run: cp -r userpatches armbian-build/
 
-      - name: Build kernel packages (Armbian runs inside Docker via 'docker' subcommand)
+      - name: Build kernel packages
         run: |
           cd armbian-build
-          ./compile.sh docker kernel \
+          ./compile.sh kernel \
             BOARD="${{ env.BOARD }}" \
             BRANCH="${{ env.KERNEL_BRANCH }}" \
             KERNEL_CONFIGURE="no"
 
-      - name: List kernel package output
-        run: |
-          echo "=== Kernel .deb packages ==="
-          find armbian-build/output/debs -name "*.deb" | sort || echo "(none found)"
+      - name: List produced .deb packages
+        run: find armbian-build/output/debs -name "*.deb" | sort || echo "(none found)"
 
-      - name: Upload kernel .deb packages as artifact
+      - name: Upload kernel packages as workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: kernel-debs-${{ github.run_number }}
           path: armbian-build/output/debs/*.deb
+          # Short retention — the APT repo on gh-pages is the permanent store
           retention-days: 7
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # 3. Publish (or update) the APT repository on GitHub Pages
-  #    • Keeps only the 2 most recent kernel versions in the pool
-  #    • Regenerates Packages / Release metadata after every change
-  #    • Pushes to the gh-pages branch (served by GitHub Pages)
-  # ──────────────────────────────────────────────────────────────────────────
+  # ---------------------------------------------------------------------------
+  # Job 3 — Publish packages to the APT repository on GitHub Pages
+  # ---------------------------------------------------------------------------
   publish-apt-repo:
-    name: Publish APT Repository to GitHub Pages
+    name: Publish APT Repository
     needs: [check-kernel-version, build-kernel]
     runs-on: self-hosted
+    # Run inside a standard Ubuntu container so that dpkg-dev and git are
+    # available without requiring those tools to be pre-installed on the runner.
+    container:
+      image: ubuntu:22.04
+      options: --user root
     permissions:
       contents: write
 
     steps:
-      - name: Checkout repository (default branch)
+      - name: Install required tools
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl dpkg-dev git gzip
+
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -155,19 +174,17 @@ jobs:
           name: kernel-debs-${{ github.run_number }}
           path: new-debs
 
-      - name: Set up gh-pages working tree
+      - name: Check out (or create) the gh-pages branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Fetch gh-pages if it already exists on origin
           git fetch origin gh-pages:refs/remotes/origin/gh-pages 2>/dev/null || true
 
           if git ls-remote --heads origin gh-pages | grep -q gh-pages; then
-            # Branch exists — create a worktree tracking it
             git worktree add apt-repo origin/gh-pages
           else
-            # First run — create an orphan gh-pages branch
+            # First run: create an orphan branch with no history
             git worktree add --detach apt-repo
             cd apt-repo
             git checkout --orphan gh-pages
@@ -176,58 +193,45 @@ jobs:
             cd ..
           fi
 
-      - name: Update APT repository structure
+      - name: Update APT pool and regenerate metadata
         env:
           KERNEL_VERSION: ${{ needs.check-kernel-version.outputs.kernel_version }}
-          # Number of kernel versions to retain in the pool
           MAX_KERNELS: "2"
         run: |
           set -euo pipefail
 
           POOL_DIR="apt-repo/pool/main"
           BINARY_DIR="apt-repo/dists/bookworm/main/binary-arm64"
-
           mkdir -p "$POOL_DIR" "$BINARY_DIR"
 
-          # ── Install APT repo tools if not present ──────────────────────────
-          if ! command -v dpkg-scanpackages >/dev/null 2>&1; then
-            sudo apt-get install -y --no-install-recommends dpkg-dev
-          fi
-
-          # ── Copy new .deb files into pool ──────────────────────────────────
+          # Add the newly built packages to the pool
           cp new-debs/*.deb "$POOL_DIR/"
-          echo "Pool contents after copy:"
+          echo "Pool contents:"
           ls -lh "$POOL_DIR/"
 
-          # ── Prune old kernel versions, keeping only MAX_KERNELS latest ─────
-          # Armbian kernel debs: linux-image-edge-rockchip64_<VER>_arm64.deb
-          # Extract the package version field (everything between the last _ pairs)
+          # Keep only the MAX_KERNELS most recent kernel versions.
+          # Versions are extracted from filenames: linux-image-*_<version>_arm64.deb
           VERSIONS=$(ls "$POOL_DIR"/linux-image-*.deb 2>/dev/null \
             | sed -n 's/.*_\([0-9][^_]*\)_arm64\.deb$/\1/p' \
             | sort -V | uniq)
 
           VERSION_COUNT=$(printf '%s\n' "$VERSIONS" | grep -c . || true)
-          echo "Kernel versions in pool ($VERSION_COUNT): $VERSIONS"
+          echo "Versions in pool ($VERSION_COUNT): $VERSIONS"
 
           if [ "$VERSION_COUNT" -gt "$MAX_KERNELS" ]; then
-            TO_REMOVE=$(printf '%s\n' "$VERSIONS" \
-              | head -n $((VERSION_COUNT - MAX_KERNELS)))
-            echo "Removing old kernel versions: $TO_REMOVE"
+            TO_REMOVE=$(printf '%s\n' "$VERSIONS" | head -n $((VERSION_COUNT - MAX_KERNELS)))
+            echo "Pruning old versions: $TO_REMOVE"
             for OLD_VER in $TO_REMOVE; do
-              # Remove all .deb files belonging to this version
               find "$POOL_DIR" -name "*_${OLD_VER}_arm64.deb" -delete -print
             done
           fi
 
-          # ── Generate Packages index ────────────────────────────────────────
+          # Regenerate the Packages index and its compressed copy
           (cd apt-repo && dpkg-scanpackages pool/main \
             > dists/bookworm/main/binary-arm64/Packages 2>/dev/null)
           gzip -k -f "$BINARY_DIR/Packages"
 
-          echo "Packages index generated:"
-          wc -l "$BINARY_DIR/Packages"
-
-          # ── Generate Release file with checksums ───────────────────────────
+          # Build the Release file with MD5 and SHA256 checksums
           DATE=$(date -Ru)
           {
             echo "Origin: Turing Pi RK1 Armbian Kernel"
@@ -240,26 +244,25 @@ jobs:
             echo "Date: $DATE"
             echo "MD5Sum:"
             for f in "$BINARY_DIR/Packages" "$BINARY_DIR/Packages.gz"; do
-              SIZE=$(wc -c < "$f")
-              MD5=$(md5sum "$f" | cut -d' ' -f1)
-              REL="${f#apt-repo/dists/bookworm/}"
-              echo " $MD5 $SIZE $REL"
+              printf " %s %s %s\n" \
+                "$(md5sum    "$f" | cut -d' ' -f1)" \
+                "$(wc -c < "$f")" \
+                "${f#apt-repo/dists/bookworm/}"
             done
             echo "SHA256:"
             for f in "$BINARY_DIR/Packages" "$BINARY_DIR/Packages.gz"; do
-              SIZE=$(wc -c < "$f")
-              SHA=$(sha256sum "$f" | cut -d' ' -f1)
-              REL="${f#apt-repo/dists/bookworm/}"
-              echo " $SHA $SIZE $REL"
+              printf " %s %s %s\n" \
+                "$(sha256sum "$f" | cut -d' ' -f1)" \
+                "$(wc -c < "$f")" \
+                "${f#apt-repo/dists/bookworm/}"
             done
           } > "apt-repo/dists/bookworm/Release"
 
-          echo "Release file generated."
-
-          # ── Write version marker (used by check-kernel-version) ────────────
+          # Track which kernel version is currently published.
+          # check-kernel-version reads this file on subsequent runs to detect new versions.
           echo "$KERNEL_VERSION" > apt-repo/latest-kernel.txt
 
-          # ── Write human-readable index page ───────────────────────────────
+          # Landing page for humans visiting the GitHub Pages URL
           PAGES_URL="${{ env.PAGES_URL }}"
           cat > apt-repo/index.html << HTMLEOF
           <!DOCTYPE html>
@@ -277,48 +280,43 @@ jobs:
           <body>
             <h1>Turing Pi RK1 — Armbian Kernel APT Repository</h1>
             <p>
-              An automatically updated APT repository for
+              Automatically updated APT repository for Armbian kernel packages targeting the
               <a href="https://turingpi.com/product/turing-rk1/">Turing Pi RK1</a>
-              kernel packages built by
-              <a href="https://github.com/armbian/build">Armbian</a>.
-              The two most recent kernel versions are always available.
+              (Rockchip RK3588S). The two most recent kernel versions are always available.
             </p>
 
-            <h2>Add repository</h2>
+            <h2>Add this repository</h2>
             <pre>echo "deb [trusted=yes] ${PAGES_URL} bookworm main" | sudo tee /etc/apt/sources.list.d/turing-rk1-kernel.list
           sudo apt update</pre>
 
-            <h2>Install kernel</h2>
+            <h2>Install the kernel</h2>
             <pre>sudo apt install linux-image-edge-rockchip64 linux-dtb-edge-rockchip64 linux-headers-edge-rockchip64
           sudo reboot</pre>
 
             <h2>Status</h2>
             <ul>
-              <li><strong>Latest kernel version:</strong> <code>${KERNEL_VERSION}</code></li>
+              <li><strong>Latest version:</strong> <code>${KERNEL_VERSION}</code></li>
               <li><strong>Last updated:</strong> ${DATE}</li>
             </ul>
 
             <h2>Source</h2>
             <p>
               Build scripts and userpatches:
-              <a href="https://github.com/${{ github.repository }}">
-                github.com/${{ github.repository }}
-              </a>
+              <a href="https://github.com/${{ github.repository }}">github.com/${{ github.repository }}</a>
             </p>
           </body>
           </html>
           HTMLEOF
 
-      - name: Commit and push APT repository to gh-pages
+      - name: Commit and push to gh-pages
         env:
           KERNEL_VERSION: ${{ needs.check-kernel-version.outputs.kernel_version }}
         run: |
           cd apt-repo
           git add -A
-          # Only commit if there are actual changes
           if git diff --cached --quiet; then
-            echo "No changes to commit."
+            echo "Nothing changed — skipping commit."
           else
-            git commit -m "APT repo: add kernel ${KERNEL_VERSION}, keep 2 latest"
+            git commit -m "kernel ${KERNEL_VERSION}: update APT repo, keep 2 latest"
             git push origin HEAD:gh-pages
           fi
