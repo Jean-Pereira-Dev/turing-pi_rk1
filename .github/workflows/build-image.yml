@@ -30,20 +30,14 @@ permissions: {}
 jobs:
   build-image:
     name: Build Armbian Image for Turing Pi RK1
-    runs-on: ubuntu-latest
+    # Runs on your self-hosted Linux runner with Docker available
+    runs-on: self-hosted
     permissions:
       contents: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
-          sudo apt-get clean
-          df -h
 
       - name: Clone Armbian build system
         run: |
@@ -56,10 +50,10 @@ jobs:
           echo "Userpatches copied:"
           find armbian-build/userpatches -type f | sort
 
-      - name: Build Armbian image
+      - name: Build Armbian image (inside Docker via compile.sh)
         run: |
           cd armbian-build
-          sudo ./compile.sh \
+          ./compile.sh docker \
             BOARD="${{ env.BOARD }}" \
             BRANCH="${{ env.BRANCH }}" \
             RELEASE="${{ env.RELEASE }}" \
