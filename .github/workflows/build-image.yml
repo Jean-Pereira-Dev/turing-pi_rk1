@@ -1,0 +1,125 @@
+name: Build Armbian Image (Monthly)
+
+on:
+  schedule:
+    # Run at 02:00 UTC on the 1st of every month
+    - cron: '0 2 1 * *'
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Kernel branch (current, edge, vendor)'
+        required: false
+        default: 'current'
+      release:
+        description: 'Armbian OS release (e.g., noble, jammy)'
+        required: false
+        default: 'noble'
+      build_minimal:
+        description: 'Build minimal image (yes/no)'
+        required: false
+        default: 'no'
+
+env:
+  BOARD: turing-rk1
+  BRANCH: ${{ github.event.inputs.branch || 'current' }}
+  RELEASE: ${{ github.event.inputs.release || 'noble' }}
+  BUILD_MINIMAL: ${{ github.event.inputs.build_minimal || 'no' }}
+
+permissions: {}
+
+jobs:
+  build-image:
+    name: Build Armbian Image for Turing Pi RK1
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
+          sudo apt-get clean
+          df -h
+
+      - name: Clone Armbian build system
+        run: |
+          git clone --depth=1 https://github.com/armbian/build.git armbian-build
+          echo "Armbian cloned at commit: $(git -C armbian-build rev-parse HEAD)"
+
+      - name: Copy userpatches into Armbian build tree
+        run: |
+          cp -r userpatches armbian-build/
+          echo "Userpatches copied:"
+          find armbian-build/userpatches -type f | sort
+
+      - name: Build Armbian image
+        run: |
+          cd armbian-build
+          sudo ./compile.sh \
+            BOARD="${{ env.BOARD }}" \
+            BRANCH="${{ env.BRANCH }}" \
+            RELEASE="${{ env.RELEASE }}" \
+            BUILD_MINIMAL="${{ env.BUILD_MINIMAL }}" \
+            BUILD_DESKTOP="no" \
+            KERNEL_CONFIGURE="no" \
+            COMPRESS_OUTPUTIMAGE="sha,xz" \
+            DEST_LANG="en_US.UTF-8"
+
+      - name: List build output
+        run: |
+          echo "=== Images ==="
+          ls -lh armbian-build/output/images/ || echo "(no images)"
+          echo "=== Debs ==="
+          ls -lh armbian-build/output/debs/ || echo "(no debs)"
+
+      - name: Upload image as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: armbian-${{ env.BOARD }}-${{ env.RELEASE }}-${{ env.BRANCH }}-${{ github.run_number }}
+          path: |
+            armbian-build/output/images/*.img.xz
+            armbian-build/output/images/*.img.xz.sha
+          retention-days: 30
+
+      - name: Determine image release tag
+        id: tag
+        run: |
+          TAG="image-$(date +%Y-%m)"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Using release tag: $TAG"
+
+      - name: Create or update monthly GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Armbian Image for Turing Pi RK1 — ${{ steps.tag.outputs.tag }}
+          body: |
+            ## Armbian Image for Turing Pi RK1
+
+            | Field | Value |
+            |-------|-------|
+            | Board | `${{ env.BOARD }}` |
+            | OS Release | `${{ env.RELEASE }}` |
+            | Kernel Branch | `${{ env.BRANCH }}` |
+            | Build Date | ${{ github.run_started_at }} |
+            | Workflow Run | [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
+            ## Installation
+
+            1. Flash the `.img.xz` image to an eMMC or SD card using [balenaEtcher](https://etcher.io) or `dd`.
+            2. Insert into the Turing Pi RK1 module and power on.
+
+            ### Verify Checksum
+            ```bash
+            sha256sum -c *.img.xz.sha
+            ```
+          files: |
+            armbian-build/output/images/*.img.xz
+            armbian-build/output/images/*.img.xz.sha
+          draft: false
+          prerelease: false
+          make_latest: true

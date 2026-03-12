@@ -1,0 +1,164 @@
+name: Build Kernel (Check Daily for New Versions)
+
+on:
+  schedule:
+    # Check kernel.org daily at 06:00 UTC
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force kernel build even if no new version detected'
+        required: false
+        default: 'false'
+      kernel_branch:
+        description: 'Armbian kernel branch to build (current, edge)'
+        required: false
+        default: 'edge'
+
+env:
+  BOARD: turing-rk1
+  KERNEL_BRANCH: ${{ github.event.inputs.kernel_branch || 'edge' }}
+
+permissions: {}
+
+jobs:
+  check-kernel-version:
+    name: Check for New Kernel Version on kernel.org
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      kernel_version: ${{ steps.check.outputs.kernel_version }}
+
+    steps:
+      - name: Fetch latest stable kernel version from kernel.org
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Retrieve latest stable kernel version from kernel.org JSON feed
+          KERNEL_JSON=$(curl -fsSL https://www.kernel.org/releases.json)
+
+          LATEST_VERSION=$(echo "$KERNEL_JSON" | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          releases = data.get('releases', [])
+          # Prefer 'stable', fall back to 'longterm'
+          for moniker in ('stable', 'longterm'):
+              candidates = [r for r in releases if r.get('moniker') == moniker]
+              if candidates:
+                  print(candidates[0]['version'])
+                  break
+          ")
+
+          if [ -z "$LATEST_VERSION" ]; then
+            echo "ERROR: Could not determine latest kernel version from kernel.org"
+            exit 1
+          fi
+
+          echo "Latest kernel.org version: $LATEST_VERSION"
+          echo "kernel_version=$LATEST_VERSION" >> "$GITHUB_OUTPUT"
+
+          # Find the last kernel version we successfully built (by inspecting release tags)
+          LAST_BUILT=$(gh release list \
+              --repo "${{ github.repository }}" \
+              --limit 100 \
+              --json tagName \
+              --jq '[.[] | .tagName | select(startswith("kernel-"))] | first // "none"' \
+            | sed 's/^kernel-//')
+
+          echo "Last built kernel version: $LAST_BUILT"
+
+          # Decide whether to build
+          if [ "${{ github.event.inputs.force_build }}" = "true" ]; then
+            echo "Force build requested — triggering build."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          elif [ "$LATEST_VERSION" != "$LAST_BUILT" ]; then
+            echo "New kernel detected ($LATEST_VERSION vs $LAST_BUILT) — triggering build."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No new kernel version ($LATEST_VERSION). Skipping build."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-kernel:
+    name: Build Kernel Packages for Turing Pi RK1
+    needs: check-kernel-version
+    if: needs.check-kernel-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
+          sudo apt-get clean
+          df -h
+
+      - name: Clone Armbian build system
+        run: |
+          git clone --depth=1 https://github.com/armbian/build.git armbian-build
+          echo "Armbian cloned at commit: $(git -C armbian-build rev-parse HEAD)"
+
+      - name: Copy userpatches into Armbian build tree
+        run: |
+          cp -r userpatches armbian-build/
+          echo "Userpatches copied:"
+          find armbian-build/userpatches -type f | sort
+
+      - name: Build kernel packages
+        run: |
+          cd armbian-build
+          sudo ./compile.sh kernel \
+            BOARD="${{ env.BOARD }}" \
+            BRANCH="${{ env.KERNEL_BRANCH }}" \
+            KERNEL_CONFIGURE="no"
+
+      - name: List kernel package output
+        run: |
+          echo "=== Kernel .deb packages ==="
+          find armbian-build/output/debs -name "*.deb" | sort || echo "(none found)"
+
+      - name: Upload kernel packages as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ needs.check-kernel-version.outputs.kernel_version }}-${{ env.BOARD }}-${{ env.KERNEL_BRANCH }}-${{ github.run_number }}
+          path: armbian-build/output/debs/*.deb
+          retention-days: 90
+
+      - name: Create GitHub Release for kernel packages
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: kernel-${{ needs.check-kernel-version.outputs.kernel_version }}
+          name: Kernel ${{ needs.check-kernel-version.outputs.kernel_version }} — Turing Pi RK1
+          body: |
+            ## Kernel Packages for Turing Pi RK1
+
+            | Field | Value |
+            |-------|-------|
+            | Kernel Version | `${{ needs.check-kernel-version.outputs.kernel_version }}` |
+            | Armbian Branch | `${{ env.KERNEL_BRANCH }}` |
+            | Board | `${{ env.BOARD }}` |
+            | Build Date | ${{ github.run_started_at }} |
+            | Workflow Run | [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |
+
+            ## Installation
+
+            Download the `.deb` packages and install them on your Turing Pi RK1:
+
+            ```bash
+            sudo dpkg -i linux-dtb-*.deb linux-headers-*.deb linux-image-*.deb
+            sudo reboot
+            ```
+
+            > **Note:** Always install all three packages together to keep the DTB,
+            > headers, and image in sync.
+          files: armbian-build/output/debs/*.deb
+          draft: false
+          prerelease: false
