@@ -5,10 +5,10 @@ Maintainer: John Doe <john.doe@somewhere.on.planet>
 Installed-Size: 27830
 Provides: linux-dtb, linux-dtb-armbian, armbian-current
 Filename: pool/main/linux-dtb-current-rockchip64_26.02.0-trunk+k6.19.8_arm64__6.18.18-S3318-Dedd0-P4e0a-C8acb-H485c-HK01ba-Vc222-Bdc65-R448a.deb
-Size: 1034840
-MD5sum: add6dd1067d5eeefafef825f8da20257
-SHA1: 43f6c05b1fcc2778ee112b8337791bbb353b644d
-SHA256: 46baffb711fed2e63697051a1dec0c9262777d37af66da088e8351b0142778b8
+Size: 1035408
+MD5sum: 982ebb0751380f0f6157e502fe46e9d9
+SHA1: 0633da5bb2102f6ebcf0003e2ff891d9221d949d
+SHA256: 5f3b06d83c99970bc6d83ebfc9cf3279de4e9d7f2ae2358f78084005f7e79e1c
 Section: kernel
 Priority: optional
 Description: Armbian Linux current DTBs in /boot/dtb-6.18.18-current-rockchip64
@@ -24,10 +24,10 @@ Installed-Size: 83943
 Depends: make, gcc, libc6-dev, bison, flex, libssl-dev, libelf-dev, pahole
 Provides: linux-headers, linux-headers-armbian, armbian-current
 Filename: pool/main/linux-headers-current-rockchip64_26.02.0-trunk+k6.19.8_arm64__6.18.18-S3318-Dedd0-P4e0a-C8acb-H485c-HK01ba-Vc222-Bdc65-R448a.deb
-Size: 15689008
-MD5sum: f04cb1874b23d956dd30e891ff470d02
-SHA1: 298c8b1e592bc904cd646173c9fb65a455f92864
-SHA256: 7a3020ee959393e0dbe156ccf6344d33e87dd8494e8e1b4f0926ec27c3c5d90e
+Size: 15688864
+MD5sum: 9136b83d3a967ae8f4e97ace751f4034
+SHA1: fefec91e9ecd5855980294118eb4bc1dd3244272
+SHA256: 8480d01a940b77537ec73ab001265f893a66fa48d39906ad57ba84db177fb47c
 Section: devel
 Priority: optional
 Description: Armbian Linux current headers 6.18.18-current-rockchip64
@@ -45,10 +45,10 @@ Maintainer: John Doe <john.doe@somewhere.on.planet>
 Installed-Size: 300939
 Provides: linux-image, linux-image-armbian, armbian-current, wireguard-modules
 Filename: pool/main/linux-image-current-rockchip64_26.02.0-trunk+k6.19.8_arm64__6.18.18-S3318-Dedd0-P4e0a-C8acb-H485c-HK01ba-Vc222-Bdc65-R448a.deb
-Size: 51771320
-MD5sum: 262d9b6a7e3cdaabcc427442c6193153
-SHA1: 585d4dc54e006f4a6371d888265ec0ff5d2fa537
-SHA256: 8b9ad0fb467fe3d49f1d10a70e3545f208f85ca991d9f08b6ae526ac86c07e8c
+Size: 51773416
+MD5sum: c9df7ed939bfca823f4fc1a1f10d4d2b
+SHA1: f37fa5cb106e0d6f0db32c9ec586f7d1058a103e
+SHA256: 6ed2ed29a3f14a12ce9bdfeadab5dd1fb33b69e3a661cc4295793af1b9d8e6f3
 Section: kernel
 Priority: optional
 Description: Armbian Linux current kernel image 6.18.18-current-rockchip64
@@ -66,10 +66,10 @@ Installed-Size: 6843
 Conflicts: linux-libc-dev
 Provides: linux-libc-dev
 Filename: pool/main/linux-libc-dev-current-rockchip64_26.02.0-trunk+k6.19.8_arm64__6.18.18-S3318-Dedd0-P4e0a-C8acb-H485c-HK01ba-Vc222-Bdc65-R448a.deb
-Size: 1441432
-MD5sum: a1357860c310ee213476821af2591282
-SHA1: 82ac32eef6343ea22f81b3fba6867fdc21824de6
-SHA256: 622623ad1dd081929af794ea30b04b606c2f4d83e429df3d73bd7ba7f6a3eb44
+Size: 1441380
+MD5sum: 3e6ba60aacda68baacec8e033f38bcf7
+SHA1: 702102a3072cebfccf4786c023bb684260f52ec4
+SHA256: 413bf9b79b2dd98950c56998c9276a0594994985d7919b4b24570df6cdfedaee
 Section: devel
 Priority: optional
 Multi-Arch: same
