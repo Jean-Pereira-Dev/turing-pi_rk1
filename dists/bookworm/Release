@@ -1,0 +1,14 @@
+Origin: Turing Pi RK1 Armbian Kernel
+Label: Turing Pi RK1 Armbian Kernel
+Suite: bookworm
+Codename: bookworm
+Architectures: arm64
+Components: main
+Description: Armbian kernel packages for Turing Pi RK1 (Rockchip RK3588S)
+Date: Sat, 14 Mar 2026 11:42:10 +0000
+MD5Sum:
+ c738ce9789859ec92f17c6e7bf1d470d 4710 main/binary-arm64/Packages
+ c2a44683ac78aec1039d311c9f71a1cc 1413 main/binary-arm64/Packages.gz
+SHA256:
+ 8ed4bb5325902108805b937213d68c9d37307eaf44f0b7dc56b972e29275ebf8 4710 main/binary-arm64/Packages
+ 922dc91e9d1ff9cf4fd0e4e9435a099c45c66d64510bb484ee22ee488ea469d8 1413 main/binary-arm64/Packages.gz

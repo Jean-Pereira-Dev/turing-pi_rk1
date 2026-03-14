@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Turing Pi RK1 - Armbian Kernel APT Repository</title>
+  <style>
+    body { font-family: sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+    pre  { background: #f4f4f4; padding: 1rem; border-radius: 4px; overflow-x: auto; }
+    code { background: #f4f4f4; padding: 0.2em 0.4em; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <h1>Turing Pi RK1 - Armbian Kernel APT Repository</h1>
+  <p>Automatically updated APT repository for Armbian kernel packages targeting the <a href="https://turingpi.com/product/turing-rk1/">Turing Pi RK1</a> (Rockchip RK3588S). The two most recent kernel versions are always available.</p>
+  <h2>Add this repository</h2>
+  <pre>echo "deb [trusted=yes] https://Jean-Pereira-Dev.github.io/turing-pi_rk1 bookworm main" | sudo tee /etc/apt/sources.list.d/turing-rk1-kernel.list
+sudo apt update</pre>
+  <h2>Install the kernel</h2>
+  <pre>sudo apt install linux-image-current-rockchip64 linux-dtb-current-rockchip64 linux-headers-current-rockchip64
+sudo reboot</pre>
+  <h2>Status</h2>
+  <ul>
+    <li><strong>Latest version:</strong> <code>6.19.8</code></li>
+    <li><strong>Last updated:</strong> Sat, 14 Mar 2026 11:42:10 +0000</li>
+  </ul>
+  <h2>Source</h2>
+  <p>Build scripts and userpatches: <a href="https://github.com/Jean-Pereira-Dev/turing-pi_rk1">github.com/Jean-Pereira-Dev/turing-pi_rk1</a></p>
+</body>
+</html>
