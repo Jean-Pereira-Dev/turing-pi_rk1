@@ -47,6 +47,30 @@ jobs:
       contents: write
 
     steps:
+      - name: Pre-clean runner disk and Docker cache
+        run: |
+          set -euo pipefail
+          echo "Disk usage before cleanup:"
+          df -h
+          docker system df || true
+
+          # Remove stale build trees from previous runs in this workspace.
+          rm -rf \
+            "$GITHUB_WORKSPACE/repo" \
+            "$GITHUB_WORKSPACE/armbian-build" \
+            "$GITHUB_WORKSPACE/armbian-build-src" \
+            "$GITHUB_WORKSPACE/tagged-debs" \
+            "$GITHUB_WORKSPACE/apt-repo"
+
+          # Trim dangling/unused Docker cache to keep self-hosted runners healthy.
+          docker builder prune -af || true
+          docker image prune -af || true
+          docker container prune -f || true
+
+          echo "Disk usage after cleanup:"
+          df -h
+          docker system df || true
+
       - name: Enforce day-1 15:00 Europe/Berlin for scheduled runs
         id: berlin_time_gate
         run: |
@@ -108,7 +132,6 @@ jobs:
             -e NO_HOST_RELEASE_CHECK="yes" \
             -e LANG="C.UTF-8" \
             -v /dev:/dev \
-            -v "$PWD":/workspace \
             -w /workspace \
             "${{ env.FEDORA_BUILDER_IMAGE }}" \
             bash -lc '
@@ -253,3 +276,22 @@ jobs:
                   "${UPLOAD_URL}?name=${NAME}" >/dev/null
               done
             '
+
+      - name: Post-clean runner disk and Docker cache
+        if: always()
+        run: |
+          set -euo pipefail
+          rm -rf \
+            "$GITHUB_WORKSPACE/repo" \
+            "$GITHUB_WORKSPACE/armbian-build" \
+            "$GITHUB_WORKSPACE/armbian-build-src" \
+            "$GITHUB_WORKSPACE/tagged-debs" \
+            "$GITHUB_WORKSPACE/apt-repo"
+
+          docker builder prune -af || true
+          docker image prune -af || true
+          docker container prune -f || true
+
+          echo "Disk usage after post-clean:"
+          df -h
+          docker system df || true

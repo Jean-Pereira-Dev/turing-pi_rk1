@@ -129,6 +129,28 @@ jobs:
       contents: write
 
     steps:
+      - name: Pre-clean runner disk and Docker cache
+        run: |
+          set -euo pipefail
+          echo "Disk usage before cleanup:"
+          df -h
+          docker system df || true
+
+          rm -rf \
+            "$GITHUB_WORKSPACE/repo" \
+            "$GITHUB_WORKSPACE/armbian-build" \
+            "$GITHUB_WORKSPACE/armbian-build-src" \
+            "$GITHUB_WORKSPACE/tagged-debs" \
+            "$GITHUB_WORKSPACE/apt-repo"
+
+          docker builder prune -af || true
+          docker image prune -af || true
+          docker container prune -f || true
+
+          echo "Disk usage after cleanup:"
+          df -h
+          docker system df || true
+
       - name: Checkout Repository
         uses: actions/checkout@v4
 
@@ -199,6 +221,7 @@ jobs:
                 gawk \
                 gpg \
                 gzip \
+                xz \
                 linux-version \
                 locale-gen \
                 uuidgen \
@@ -328,6 +351,21 @@ jobs:
                 echo "ERROR: linux-image package not present in ${POOL_DIR}"
                 exit 1
               fi
+              if ! ls "${POOL_DIR}"/linux-dtb-*.deb >/dev/null 2>&1; then
+                echo "ERROR: linux-dtb package not present in ${POOL_DIR}"
+                exit 1
+              fi
+              if ! ls "${POOL_DIR}"/linux-headers-*.deb >/dev/null 2>&1; then
+                echo "ERROR: linux-headers package not present in ${POOL_DIR}"
+                exit 1
+              fi
+              # linux-libc-dev* is optional and depends on what Armbian emits
+              # for a given branch/config, so we report but do not fail.
+              if ls "${POOL_DIR}"/linux-libc-dev-*.deb >/dev/null 2>&1; then
+                echo "Detected linux-libc-dev package(s) in publish set."
+              else
+                echo "NOTE: No linux-libc-dev package produced by this build."
+              fi
 
               MAX_KERNELS=2
               VERSIONS=$(ls "${POOL_DIR}"/linux-image-*.deb 2>/dev/null \
@@ -338,12 +376,15 @@ jobs:
               if [ "${VERSION_COUNT}" -gt "${MAX_KERNELS}" ]; then
                 TO_REMOVE=$(printf "%s\n" "${VERSIONS}" | head -n $((VERSION_COUNT - MAX_KERNELS)))
                 for OLD_VER in ${TO_REMOVE}; do
-                  find "${POOL_DIR}" -name "*_${OLD_VER}_arm64.deb" -delete -print
+                  # Remove old version packages across all arches (arm64/all),
+                  # keeping metadata compact while preserving the latest versions.
+                  find "${POOL_DIR}" -name "*_${OLD_VER}_*.deb" -delete -print
                 done
               fi
 
               (cd apt-repo && dpkg-scanpackages pool/main > dists/bookworm/main/binary-arm64/Packages 2>/dev/null)
               gzip -n -9 -k -f "${BINARY_DIR}/Packages"
+              xz -T0 -9e -k -f "${BINARY_DIR}/Packages"
 
               DATE=$(date -Ru)
               {
@@ -356,14 +397,14 @@ jobs:
                 echo "Description: Armbian kernel packages for Turing Pi RK1 (Rockchip RK3588S)"
                 echo "Date: ${DATE}"
                 echo "MD5Sum:"
-                for f in "${BINARY_DIR}/Packages" "${BINARY_DIR}/Packages.gz"; do
+                for f in "${BINARY_DIR}/Packages" "${BINARY_DIR}/Packages.gz" "${BINARY_DIR}/Packages.xz"; do
                   printf " %s %s %s\n" \
                     "$(md5sum    "${f}" | cut -d" " -f1)" \
                     "$(wc -c < "${f}")" \
                     "${f#apt-repo/dists/bookworm/}"
                 done
                 echo "SHA256:"
-                for f in "${BINARY_DIR}/Packages" "${BINARY_DIR}/Packages.gz"; do
+                for f in "${BINARY_DIR}/Packages" "${BINARY_DIR}/Packages.gz" "${BINARY_DIR}/Packages.xz"; do
                   printf " %s %s %s\n" \
                     "$(sha256sum "${f}" | cut -d" " -f1)" \
                     "$(wc -c < "${f}")" \
@@ -450,6 +491,7 @@ jobs:
               for REQUIRED in \
                 apt-repo/dists/bookworm/main/binary-arm64/Packages \
                 apt-repo/dists/bookworm/main/binary-arm64/Packages.gz \
+                apt-repo/dists/bookworm/main/binary-arm64/Packages.xz \
                 apt-repo/dists/bookworm/Release \
                 apt-repo/latest-kernel.txt \
                 apt-repo/index.html; do
@@ -465,3 +507,22 @@ jobs:
                 git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:gh-pages
               fi
             '
+
+      - name: Post-clean runner disk and Docker cache
+        if: always()
+        run: |
+          set -euo pipefail
+          rm -rf \
+            "$GITHUB_WORKSPACE/repo" \
+            "$GITHUB_WORKSPACE/armbian-build" \
+            "$GITHUB_WORKSPACE/armbian-build-src" \
+            "$GITHUB_WORKSPACE/tagged-debs" \
+            "$GITHUB_WORKSPACE/apt-repo"
+
+          docker builder prune -af || true
+          docker image prune -af || true
+          docker container prune -f || true
+
+          echo "Disk usage after post-clean:"
+          df -h
+          docker system df || true
