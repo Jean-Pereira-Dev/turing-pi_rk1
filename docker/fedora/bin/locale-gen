@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$#" -eq 0 ]; then
+  exit 0
+fi
+
+if ! command -v localedef >/dev/null 2>&1; then
+  exit 0
+fi
+
+for locale in "$@"; do
+  language="${locale%%.*}"
+  charset="${locale#*.}"
+  if [ "${language}" = "${locale}" ]; then
+    charset="UTF-8"
+  fi
+
+  # Fedora ships locale sources, but not Debian's locale-gen helper.
+  localedef -i "${language}" -f "${charset}" "${locale}" >/dev/null 2>&1 || true
+done

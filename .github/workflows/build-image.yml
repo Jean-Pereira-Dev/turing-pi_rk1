@@ -1,0 +1,255 @@
+name: Build Armbian Image (Monthly)
+
+# Builds a complete Armbian OS image for the Turing Pi RK1 module once a month
+# (or on demand). The image is published as a GitHub Release.
+#
+# The job runs inside a custom Fedora builder container so that all build
+# dependencies stay self-contained and the runner host stays clean.
+
+on:
+  schedule:
+    # 15:00 Europe/Berlin on the 1st day of each month.
+    # GitHub cron is UTC, so schedule both CET and CEST candidates and gate in-job.
+    - cron: '0 13 1 * *'
+    - cron: '0 14 1 * *'
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Kernel branch (current, edge, vendor)'
+        required: false
+        default: 'current'
+      release:
+        description: 'Armbian OS release (e.g., noble, jammy)'
+        required: false
+        default: 'noble'
+      build_minimal:
+        description: 'Build minimal image (yes/no)'
+        required: false
+        default: 'no'
+
+env:
+  BOARD: turing-rk1
+  BRANCH: ${{ github.event.inputs.branch || 'current' }}
+  RELEASE: ${{ github.event.inputs.release || 'noble' }}
+  BUILD_MINIMAL: ${{ github.event.inputs.build_minimal || 'no' }}
+  ARMBIAN_REF: latest
+  ARMBIAN_DEPTH: '1500'
+  FEDORA_VERSION: '43'
+  FEDORA_BUILDER_IMAGE: turing-rk1-fedora-builder:fedora43
+
+permissions: {}
+
+jobs:
+  build-image:
+    name: Build Armbian Image for Turing Pi RK1
+    runs-on: self-hosted
+    permissions:
+      contents: write
+
+    steps:
+      - name: Enforce day-1 15:00 Europe/Berlin for scheduled runs
+        id: berlin_time_gate
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BERLIN_DAY=$(TZ=Europe/Berlin date +%d)
+          BERLIN_HOUR=$(TZ=Europe/Berlin date +%H)
+          if [ "$BERLIN_DAY" = "01" ] && [ "$BERLIN_HOUR" = "15" ]; then
+            echo "Scheduled run matches day=01 hour=15 Europe/Berlin."
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Skipping schedule outside day=01 hour=15 Europe/Berlin (day=${BERLIN_DAY}, hour=${BERLIN_HOUR})."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Register binfmt emulation
+        if: steps.berlin_time_gate.outputs.should_run == 'true'
+        run: |
+          # Required for arm64 rootfs operations during build.
+          docker run --privileged --rm tonistiigi/binfmt --install arm64,arm,riscv64
+
+      - name: Checkout Repository
+        if: steps.berlin_time_gate.outputs.should_run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Build Fedora Builder Image
+        if: steps.berlin_time_gate.outputs.should_run == 'true'
+        run: |
+          FEDORA_VERSION="${{ env.FEDORA_VERSION }}" \
+          FEDORA_BUILDER_IMAGE="${{ env.FEDORA_BUILDER_IMAGE }}" \
+          ./scripts/build-fedora-builder-image.sh
+
+      - name: Run full build and release inside container
+        if: steps.berlin_time_gate.outputs.should_run == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          docker run --rm --privileged \
+            -e GH_TOKEN="$GH_TOKEN" \
+            -e COLUMNS="160" \
+            -e XZ_OPT="-9e" \
+            -e BOARD="${{ env.BOARD }}" \
+            -e BRANCH="${{ env.BRANCH }}" \
+            -e RELEASE="${{ env.RELEASE }}" \
+            -e BUILD_MINIMAL="${{ env.BUILD_MINIMAL }}" \
+            -e ARMBIAN_REF="${{ env.ARMBIAN_REF }}" \
+            -e ARMBIAN_DEPTH="${{ env.ARMBIAN_DEPTH }}" \
+            -e GITHUB_REPOSITORY="${{ github.repository }}" \
+            -e GITHUB_RUN_ID="${{ github.run_id }}" \
+            -e GITHUB_RUN_NUMBER="${{ github.run_number }}" \
+            -e GITHUB_SERVER_URL="${{ github.server_url }}" \
+            -e ARMBIAN_RUNNING_IN_CONTAINER="yes" \
+            -e PRE_PREPARED_HOST="yes" \
+            -e NO_HOST_RELEASE_CHECK="yes" \
+            -e LANG="C.UTF-8" \
+            -v /dev:/dev \
+            -v "$PWD":/workspace \
+            -w /workspace \
+            "${{ env.FEDORA_BUILDER_IMAGE }}" \
+            bash -lc '
+              set -euo pipefail
+              export COLUMNS="${COLUMNS:-160}"
+              [ -n "$COLUMNS" ] || export COLUMNS=160
+              export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+              for tool in \
+                dialog \
+                dpkg \
+                dpkg-architecture \
+                fuser \
+                git \
+                curl \
+                gawk \
+                gpg \
+                linux-version \
+                locale-gen \
+                uuidgen \
+                aarch64-linux-gnu-gcc \
+                arm-linux-gnueabi-gcc \
+                qemu-aarch64-static; do
+                command -v "${tool}" >/dev/null || { echo "ERROR: Missing required tool: ${tool}"; exit 1; }
+              done
+
+              rm -rf repo armbian-build armbian-build-src
+              git clone --depth=1 "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" repo
+
+              if [ "${ARMBIAN_REF}" = "latest" ]; then
+                ARMBIAN_REF="$(curl -fsSL https://api.github.com/repos/armbian/build/releases/latest \
+                  | jq -r ".tag_name")"
+              fi
+
+              git clone --depth="${ARMBIAN_DEPTH}" https://github.com/armbian/build.git armbian-build-src
+              git -C armbian-build-src fetch --depth="${ARMBIAN_DEPTH}" origin "${ARMBIAN_REF}"
+              git -C armbian-build-src checkout -f FETCH_HEAD
+              SELECTED_SHA="$(git -C armbian-build-src rev-parse HEAD)"
+              SELECTED_VERSION="$(git -C armbian-build-src show "${SELECTED_SHA}:config/sources/families/include/rockchip64_common.inc" 2>/dev/null \
+                | sed -n "/^[[:space:]]*${BRANCH})/,/^[[:space:]]*;;/p" \
+                | grep "KERNEL_MAJOR_MINOR=" | head -1 | grep -oE "[0-9]+[.][0-9]+" | head -1 || true)"
+              echo "Pinned Armbian ref: ${ARMBIAN_REF} @ ${SELECTED_SHA}"
+              echo "Selected kernel line for ${BRANCH}: ${SELECTED_VERSION:-unknown}"
+
+              git clone --quiet --no-checkout armbian-build-src armbian-build
+              cp -r repo/userpatches armbian-build/
+              find armbian-build/userpatches -type f | sort
+
+              cd armbian-build
+              git checkout -f "${SELECTED_SHA}"
+              rm -rf output
+              ./compile.sh rk1-workarounds \
+                BOARD="${BOARD}" \
+                BRANCH="${BRANCH}" \
+                RELEASE="${RELEASE}" \
+                BUILD_MINIMAL="${BUILD_MINIMAL}" \
+                BUILD_DESKTOP="no" \
+                USE_TMPFS="no" \
+                KERNEL_CONFIGURE="no" \
+                COMPRESS_OUTPUTIMAGE="sha,xz" \
+                DEST_LANG="en_US.UTF-8"
+
+              # Recompress image artifacts with strongest xz settings to reduce size.
+              shopt -s nullglob
+              for f in output/images/*.img.xz; do
+                tmp_img="${f%.xz}"
+                xz -dc "${f}" > "${tmp_img}"
+                xz -T0 -9e -f "${tmp_img}"
+              done
+
+              ls -lh output/images/ || echo "(no images)"
+              ls -lh output/debs/   || echo "(no debs)"
+
+              BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+              TAG="image-$(date +%Y-%m)"
+              API="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+
+              BODY=$(printf "%s\n" \
+                "## Armbian Image for Turing Pi RK1" \
+                "" \
+                "| Field | Value |" \
+                "|-------|-------|" \
+                "| Board | ${BOARD} |" \
+                "| OS Release | ${RELEASE} |" \
+                "| Kernel Branch | ${BRANCH} |" \
+                "| Build Date (UTC) | ${BUILD_DATE} |" \
+                "| Workflow Run | [${GITHUB_RUN_NUMBER}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) |" \
+                "" \
+                "## Installation" \
+                "" \
+                "1. Flash the .img.xz file to an eMMC or SD card using dd or your preferred imaging tool." \
+                "2. Insert into the Turing Pi RK1 module and power on." \
+                "" \
+                "\`\`\`bash" \
+                "sha256sum -c *.img.xz.sha" \
+                "\`\`\`")
+
+              EXISTING=$(curl -fsS \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                "${API}/releases/tags/${TAG}" || true)
+
+              if echo "${EXISTING}" | jq -e ".id" >/dev/null 2>&1; then
+                RELEASE_JSON=$(curl -fsS -X PATCH \
+                  -H "Authorization: Bearer ${GH_TOKEN}" \
+                  -H "Accept: application/vnd.github+json" \
+                  "${API}/releases/$(echo "${EXISTING}" | jq -r ".id")" \
+                  -d "$(jq -n --arg name "Armbian Image for Turing Pi RK1 - ${TAG}" --arg body "${BODY}" "{name:\$name, body:\$body, draft:false, prerelease:false, make_latest:\"true\"}")")
+              else
+                RELEASE_JSON=$(curl -fsS -X POST \
+                  -H "Authorization: Bearer ${GH_TOKEN}" \
+                  -H "Accept: application/vnd.github+json" \
+                  "${API}/releases" \
+                  -d "$(jq -n --arg tag "${TAG}" --arg name "Armbian Image for Turing Pi RK1 - ${TAG}" --arg body "${BODY}" "{tag_name:\$tag, name:\$name, body:\$body, draft:false, prerelease:false, make_latest:\"true\"}")")
+              fi
+
+              RELEASE_ID=$(echo "${RELEASE_JSON}" | jq -r ".id")
+              UPLOAD_URL=$(echo "${RELEASE_JSON}" | jq -r ".upload_url" | sed "s/{?name,label}//")
+
+              for FILE in output/images/*.img.xz output/images/*.img.xz.sha; do
+                [ -f "${FILE}" ] || continue
+                NAME="$(basename "${FILE}")"
+
+                OLD_ASSET_ID=$(curl -fsS \
+                  -H "Authorization: Bearer ${GH_TOKEN}" \
+                  -H "Accept: application/vnd.github+json" \
+                  "${API}/releases/${RELEASE_ID}/assets" \
+                  | jq -r --arg name "${NAME}" ".[] | select(.name==\$name) | .id" | head -n1)
+
+                if [ -n "${OLD_ASSET_ID:-}" ]; then
+                  curl -fsS -X DELETE \
+                    -H "Authorization: Bearer ${GH_TOKEN}" \
+                    -H "Accept: application/vnd.github+json" \
+                    "${API}/releases/assets/${OLD_ASSET_ID}" >/dev/null
+                fi
+
+                curl -fsS -X POST \
+                  -H "Authorization: Bearer ${GH_TOKEN}" \
+                  -H "Content-Type: application/octet-stream" \
+                  --data-binary @"${FILE}" \
+                  "${UPLOAD_URL}?name=${NAME}" >/dev/null
+              done
+            '

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+[ "$#" -gt 0 ] || exit 0
+
+printf -v quoted_cmd '%q ' "$@"
+exec script --quiet --return --flush -c "${quoted_cmd% }" /dev/null

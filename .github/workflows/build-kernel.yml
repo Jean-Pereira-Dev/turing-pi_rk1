@@ -1,0 +1,467 @@
+name: Build Kernel (Check Weekly for New Versions)
+
+# Runs weekly to detect new upstream kernel versions. When a new version is found
+# the pipeline builds Armbian kernel packages and publishes them to the APT
+# repository hosted on GitHub Pages.
+#
+# Pipeline overview:
+#   1. check-kernel-version  — compare kernel.org against the published APT repo
+#   2. build-and-publish     — build .deb packages and publish gh-pages inside one container
+
+on:
+  schedule:
+    # Weekly check on Tuesday at 13:00 Europe/Berlin.
+    # GitHub cron is UTC, so we schedule both CET and CEST candidates and gate in-job.
+    - cron: '0 11 * * 2'
+    - cron: '0 12 * * 2'
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force build even if no new version found (true/false)'
+        required: false
+        default: 'false'
+
+env:
+  BOARD: turing-rk1
+  # Stable-only policy: use Armbian current branch (never RC).
+  KERNEL_BRANCH: current
+  # Use latest Armbian release tag; override manually if needed.
+  ARMBIAN_REF: latest
+  # Reduce first-run kernel source fetch weight in CI.
+  KERNEL_GIT_MODE: shallow
+  FEDORA_VERSION: '43'
+  FEDORA_BUILDER_IMAGE: turing-rk1-fedora-builder:fedora43
+  # URL where GitHub Pages serves the gh-pages branch of this repository
+  PAGES_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+  # Raw gh-pages URL used as a fallback before Pages is enabled or while it is
+  # still deploying a fresh publish.
+  RAW_PAGES_URL: https://raw.githubusercontent.com/${{ github.repository }}/gh-pages
+
+permissions: {}
+
+jobs:
+
+  # ---------------------------------------------------------------------------
+  # Job 1 — Check whether a new kernel version is available
+  # ---------------------------------------------------------------------------
+  check-kernel-version:
+    name: Check for New Kernel Version
+    runs-on: self-hosted
+    permissions:
+      contents: read
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      kernel_version: ${{ steps.check.outputs.kernel_version }}
+
+    steps:
+      - name: Compare kernel.org against last published version
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            BERLIN_DOW=$(TZ=Europe/Berlin date +%u)
+            BERLIN_HOUR=$(TZ=Europe/Berlin date +%H)
+            if [ "$BERLIN_DOW" != "2" ] || [ "$BERLIN_HOUR" != "13" ]; then
+              echo "Skipping schedule outside Tuesday 13:00 Europe/Berlin (dow=${BERLIN_DOW}, hour=${BERLIN_HOUR})."
+              echo "should_build=false" >> "$GITHUB_OUTPUT"
+              echo "kernel_version=skipped" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          # Fetch the list of current releases from kernel.org
+          KERNEL_JSON=$(curl -fsSL https://www.kernel.org/releases.json)
+
+          # Pick the latest stable release from kernel.org.
+          LATEST_VERSION=$(echo "$KERNEL_JSON" | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          releases = data.get('releases', [])
+          candidates = [r for r in releases if r.get('moniker') == 'stable']
+          if candidates:
+              print(candidates[0]['version'])
+          ")
+
+          if [ -z "$LATEST_VERSION" ]; then
+            echo "ERROR: Could not determine latest stable kernel version from kernel.org"
+            exit 1
+          fi
+
+          echo "Latest upstream stable kernel : $LATEST_VERSION"
+          echo "kernel_version=$LATEST_VERSION" >> "$GITHUB_OUTPUT"
+
+          # Read the version that was last published to the APT repo.
+          # latest-kernel.txt is written by build-and-publish-kernel and served via GitHub Pages.
+          # Falls back to "none" on the very first run before anything has been published.
+          LAST_BUILT="$(
+            {
+              curl -fsSL "${{ env.PAGES_URL }}/latest-kernel.txt" 2>/dev/null \
+                || curl -fsSL "${{ env.RAW_PAGES_URL }}/latest-kernel.txt" 2>/dev/null \
+                || true
+            } | tr -d '[:space:]'
+          )"
+          if [ -z "$LAST_BUILT" ]; then
+            echo "WARNING: Could not read latest-kernel.txt from Pages or raw gh-pages; treating this as a first publish."
+            LAST_BUILT="none"
+          fi
+
+          echo "Last published kernel  : $LAST_BUILT"
+
+          if [ "${{ github.event.inputs.force_build }}" = "true" ]; then
+            echo "Force-build requested."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          elif [ "$LATEST_VERSION" != "$LAST_BUILT" ]; then
+            echo "New version found — scheduling build."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Already up to date — skipping build."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Job 2 — Build kernel .deb packages and publish APT repo in one container
+  # ---------------------------------------------------------------------------
+  build-and-publish-kernel:
+    name: Build and Publish Kernel Packages
+    needs: check-kernel-version
+    if: needs.check-kernel-version.outputs.should_build == 'true'
+    runs-on: self-hosted
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Build Fedora Builder Image
+        run: |
+          FEDORA_VERSION="${{ env.FEDORA_VERSION }}" \
+          FEDORA_BUILDER_IMAGE="${{ env.FEDORA_BUILDER_IMAGE }}" \
+          ./scripts/build-fedora-builder-image.sh
+
+      - name: Register binfmt emulation
+        run: |
+          docker run --privileged --rm tonistiigi/binfmt --install arm64,arm,riscv64
+
+      - name: Run full kernel build and APT publish inside container
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          APT_GPG_KEY_ID: ${{ secrets.APT_GPG_KEY_ID }}
+          APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+          KERNEL_VERSION: ${{ needs.check-kernel-version.outputs.kernel_version }}
+          PAGES_URL: ${{ env.PAGES_URL }}
+        run: |
+          set -euo pipefail
+          # Build in container-local /workspace to avoid host mount option issues
+          # (e.g. noexec/nosuid/nodev) on some self-hosted runners.
+          docker run --rm --privileged \
+            -e CI="true" \
+            -e DEB_COMPRESS="xz" \
+            -e XZ_OPT="-9e" \
+            -e GZIP="-9" \
+            -e GH_TOKEN="$GH_TOKEN" \
+            -e COLUMNS="160" \
+            -e GITHUB_RUN_ID="${{ github.run_id }}" \
+            -e GITHUB_RUN_NUMBER="${{ github.run_number }}" \
+            -e BOARD="${{ env.BOARD }}" \
+            -e KERNEL_BRANCH="${{ env.KERNEL_BRANCH }}" \
+            -e ARMBIAN_REF="${{ env.ARMBIAN_REF }}" \
+            -e KERNEL_GIT_MODE="${{ env.KERNEL_GIT_MODE }}" \
+            -e KERNEL_VERSION="$KERNEL_VERSION" \
+            -e PAGES_URL="$PAGES_URL" \
+            -e APT_GPG_PRIVATE_KEY="${APT_GPG_PRIVATE_KEY:-}" \
+            -e APT_GPG_KEY_ID="${APT_GPG_KEY_ID:-}" \
+            -e APT_GPG_PASSPHRASE="${APT_GPG_PASSPHRASE:-}" \
+            -e GITHUB_REPOSITORY="${{ github.repository }}" \
+            -e ARMBIAN_RUNNING_IN_CONTAINER="yes" \
+            -e PRE_PREPARED_HOST="yes" \
+            -e NO_HOST_RELEASE_CHECK="yes" \
+            -e LANG="C.UTF-8" \
+            -v /dev:/dev \
+            -w /workspace \
+            "${{ env.FEDORA_BUILDER_IMAGE }}" \
+            bash -lc '
+              set -euo pipefail
+              export COLUMNS="${COLUMNS:-160}"
+              [ -n "$COLUMNS" ] || export COLUMNS=160
+              export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+              mkdir -p /workspace
+              cd /workspace
+
+              # Fail early if the custom Fedora builder image is missing expected tools.
+              for tool in \
+                dialog \
+                dpkg \
+                dpkg-architecture \
+                fuser \
+                git \
+                curl \
+                gawk \
+                gpg \
+                gzip \
+                linux-version \
+                locale-gen \
+                uuidgen \
+                aarch64-linux-gnu-gcc \
+                arm-linux-gnueabi-gcc; do
+                command -v "${tool}" >/dev/null || { echo "ERROR: Missing required tool: ${tool}"; exit 1; }
+              done
+
+              rm -rf repo armbian-build armbian-build-src
+              git clone --depth=1 "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" repo
+
+              # Resolve latest Armbian release tag when requested.
+              if [ "${ARMBIAN_REF}" = "latest" ]; then
+                ARMBIAN_REF="$(curl -fsSL https://api.github.com/repos/armbian/build/releases/latest \
+                  | jq -r ".tag_name")"
+              fi
+
+              # Clone Armbian at selected ref and build exactly that ref.
+              git clone --depth=1500 https://github.com/armbian/build.git armbian-build-src
+              git -C armbian-build-src fetch --depth=1500 origin "${ARMBIAN_REF}"
+              git -C armbian-build-src checkout -f FETCH_HEAD
+              echo "Pinned Armbian ref: ${ARMBIAN_REF} @ $(git -C armbian-build-src rev-parse HEAD)"
+              SELECTED_SHA="$(git -C armbian-build-src rev-parse HEAD)"
+              SELECTED_VERSION="$(git -C armbian-build-src show "${SELECTED_SHA}:config/sources/families/include/rockchip64_common.inc" 2>/dev/null \
+                | sed -n "/^[[:space:]]*${KERNEL_BRANCH})/,/^[[:space:]]*;;/p" \
+                | grep "KERNEL_MAJOR_MINOR=" | head -1 | grep -oE "[0-9]+[.][0-9]+" | head -1 || true)"
+              echo "Selected Armbian commit ${SELECTED_SHA} (kernel line: ${SELECTED_VERSION:-unknown})"
+
+              KERNEL_BUILD_TIMEOUT_MINUTES="${KERNEL_BUILD_TIMEOUT_MINUTES:-120}"
+              rm -rf armbian-build
+              git clone --quiet --no-checkout armbian-build-src armbian-build
+              cp -r repo/userpatches armbian-build/
+              cd armbian-build
+              git checkout -f "${SELECTED_SHA}"
+              rm -rf output
+
+              if ! timeout --foreground "${KERNEL_BUILD_TIMEOUT_MINUTES}m" ./compile.sh rk1-workarounds kernel \
+                BOARD="${BOARD}" \
+                BRANCH="${KERNEL_BRANCH}" \
+                KERNEL_GIT="${KERNEL_GIT_MODE}" \
+                USE_TMPFS="no" \
+                KERNEL_CONFIGURE="no"; then
+                rc=$?
+                if [ "${rc}" -eq 124 ]; then
+                  echo "ERROR: Build timed out after ${KERNEL_BUILD_TIMEOUT_MINUTES}m"
+                fi
+                echo "ERROR: Kernel build failed at ${SELECTED_SHA}"
+                exit 1
+              fi
+
+              RESOLVED_KERNEL_BRANCH=$(grep -Rhm1 -oE "KERNELBRANCH=[^[:space:]]+" output/logs 2>/dev/null \
+                | cut -d= -f2 \
+                | tr -d "\047" || true)
+              if [ -n "${RESOLVED_KERNEL_BRANCH}" ]; then
+                echo "Resolved Armbian KERNELBRANCH: ${RESOLVED_KERNEL_BRANCH}"
+              else
+                echo "WARNING: Could not extract resolved KERNELBRANCH from output/logs"
+              fi
+              if printf "%s" "${RESOLVED_KERNEL_BRANCH}" | grep -q -- "-rc"; then
+                echo "ERROR: Resolved KERNELBRANCH is release-candidate (${RESOLVED_KERNEL_BRANCH})"
+                exit 1
+              fi
+
+              cd /workspace
+
+              cd /workspace
+              mapfile -t NEW_DEBS < <(find armbian-build/output -type f -name "*.deb" | sort)
+              if [ "${#NEW_DEBS[@]}" -eq 0 ]; then
+                echo "ERROR: No kernel .deb packages were produced"
+                exit 1
+              fi
+              if printf "%s\n" "${NEW_DEBS[@]}" | grep -q -- "-rc"; then
+                echo "ERROR: Produced package filenames indicate an RC kernel"
+                printf "%s\n" "${NEW_DEBS[@]}"
+                exit 1
+              fi
+
+              # Publish filenames with an explicit upstream kernel marker.
+              # This keeps package metadata unchanged while making file names
+              # easier to inspect in the APT pool (e.g. +k6.18.18).
+              TAGGED_DEBS_DIR="/workspace/tagged-debs"
+              rm -rf "${TAGGED_DEBS_DIR}"
+              mkdir -p "${TAGGED_DEBS_DIR}"
+              mapfile -t NEW_DEBS < <(
+                for deb in "${NEW_DEBS[@]}"; do
+                  base="$(basename "${deb}")"
+                  if [[ "${base}" =~ ^([^_]+)_([^_]+)_arm64(.*)\.deb$ ]]; then
+                    pkg="${BASH_REMATCH[1]}"
+                    ver="${BASH_REMATCH[2]}"
+                    suffix="${BASH_REMATCH[3]}"
+                    tagged_ver="${ver}"
+                    if [[ "${ver}" != *"+k${KERNEL_VERSION}"* ]]; then
+                      tagged_ver="${ver}+k${KERNEL_VERSION}"
+                    fi
+                    out="${TAGGED_DEBS_DIR}/${pkg}_${tagged_ver}_arm64${suffix}.deb"
+                    cp -f "${deb}" "${out}"
+                    printf "%s\n" "${out}"
+                  else
+                    out="${TAGGED_DEBS_DIR}/${base}"
+                    cp -f "${deb}" "${out}"
+                    printf "%s\n" "${out}"
+                  fi
+                done | sort
+              )
+
+              rm -rf apt-repo
+              if git ls-remote --exit-code --heads "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages >/dev/null 2>&1; then
+                git clone --depth=1 --branch gh-pages "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" apt-repo
+              else
+                mkdir -p apt-repo
+                git -C apt-repo init
+                git -C apt-repo checkout --orphan gh-pages
+                git -C apt-repo rm -rf . >/dev/null 2>&1 || true
+              fi
+
+              git -C apt-repo config user.name "github-actions[bot]"
+              git -C apt-repo config user.email "github-actions[bot]@users.noreply.github.com"
+
+              POOL_DIR="apt-repo/pool/main"
+              BINARY_DIR="apt-repo/dists/bookworm/main/binary-arm64"
+              mkdir -p "${POOL_DIR}" "${BINARY_DIR}"
+
+              cp "${NEW_DEBS[@]}" "${POOL_DIR}/"
+              ls -lh "${POOL_DIR}/"
+
+              if ! ls "${POOL_DIR}"/linux-image-*.deb >/dev/null 2>&1; then
+                echo "ERROR: linux-image package not present in ${POOL_DIR}"
+                exit 1
+              fi
+
+              MAX_KERNELS=2
+              VERSIONS=$(ls "${POOL_DIR}"/linux-image-*.deb 2>/dev/null \
+                | sed -n "s/.*_\([0-9][^_]*\)_arm64\.deb$/\1/p" \
+                | sort -V | uniq)
+              VERSION_COUNT=$(printf "%s\n" "${VERSIONS}" | grep -c . || true)
+
+              if [ "${VERSION_COUNT}" -gt "${MAX_KERNELS}" ]; then
+                TO_REMOVE=$(printf "%s\n" "${VERSIONS}" | head -n $((VERSION_COUNT - MAX_KERNELS)))
+                for OLD_VER in ${TO_REMOVE}; do
+                  find "${POOL_DIR}" -name "*_${OLD_VER}_arm64.deb" -delete -print
+                done
+              fi
+
+              (cd apt-repo && dpkg-scanpackages pool/main > dists/bookworm/main/binary-arm64/Packages 2>/dev/null)
+              gzip -n -9 -k -f "${BINARY_DIR}/Packages"
+
+              DATE=$(date -Ru)
+              {
+                echo "Origin: Turing Pi RK1 Armbian Kernel"
+                echo "Label: Turing Pi RK1 Armbian Kernel"
+                echo "Suite: bookworm"
+                echo "Codename: bookworm"
+                echo "Architectures: arm64"
+                echo "Components: main"
+                echo "Description: Armbian kernel packages for Turing Pi RK1 (Rockchip RK3588S)"
+                echo "Date: ${DATE}"
+                echo "MD5Sum:"
+                for f in "${BINARY_DIR}/Packages" "${BINARY_DIR}/Packages.gz"; do
+                  printf " %s %s %s\n" \
+                    "$(md5sum    "${f}" | cut -d" " -f1)" \
+                    "$(wc -c < "${f}")" \
+                    "${f#apt-repo/dists/bookworm/}"
+                done
+                echo "SHA256:"
+                for f in "${BINARY_DIR}/Packages" "${BINARY_DIR}/Packages.gz"; do
+                  printf " %s %s %s\n" \
+                    "$(sha256sum "${f}" | cut -d" " -f1)" \
+                    "$(wc -c < "${f}")" \
+                    "${f#apt-repo/dists/bookworm/}"
+                done
+              } > "apt-repo/dists/bookworm/Release"
+
+              # Optional APT metadata signing when secrets are provided.
+              # Required secrets:
+              # - APT_GPG_PRIVATE_KEY   (armored private key)
+              # - APT_GPG_KEY_ID        (signing key fingerprint/id)
+              # Optional:
+              # - APT_GPG_PASSPHRASE
+              if [ -n "${APT_GPG_PRIVATE_KEY:-}" ] && [ -n "${APT_GPG_KEY_ID:-}" ]; then
+                export GNUPGHOME="/workspace/.gnupg"
+                rm -rf "${GNUPGHOME}"
+                mkdir -p "${GNUPGHOME}"
+                chmod 700 "${GNUPGHOME}"
+                printf "%s" "${APT_GPG_PRIVATE_KEY}" | gpg --batch --import
+
+                GPG_ARGS=(--batch --yes --pinentry-mode loopback --local-user "${APT_GPG_KEY_ID}")
+                if [ -n "${APT_GPG_PASSPHRASE:-}" ]; then
+                  GPG_ARGS+=(--passphrase "${APT_GPG_PASSPHRASE}")
+                fi
+
+                gpg "${GPG_ARGS[@]}" --armor --detach-sign \
+                  --output "apt-repo/dists/bookworm/Release.gpg" \
+                  "apt-repo/dists/bookworm/Release"
+                gpg "${GPG_ARGS[@]}" --clearsign \
+                  --output "apt-repo/dists/bookworm/InRelease" \
+                  "apt-repo/dists/bookworm/Release"
+
+                # Optional .deb signing if dpkg-sig exists in builder image.
+                if command -v dpkg-sig >/dev/null 2>&1; then
+                  for d in "${POOL_DIR}"/*.deb; do
+                    [ -f "${d}" ] || continue
+                    dpkg-sig --sign builder -k "${APT_GPG_KEY_ID}" "${d}" || true
+                  done
+                fi
+              fi
+
+              echo "${KERNEL_VERSION}" > apt-repo/latest-kernel.txt
+
+              # Always refresh a publish marker to show when the repo was last updated.
+              {
+                echo "kernel_version=${KERNEL_VERSION}"
+                echo "run_id=${GITHUB_RUN_ID}"
+                echo "run_number=${GITHUB_RUN_NUMBER}"
+                echo "published_at=${DATE}"
+              } > apt-repo/.last-publish.txt
+
+              printf "%s\n" \
+                "<!DOCTYPE html>" \
+                "<html lang=\"en\">" \
+                "<head>" \
+                "  <meta charset=\"UTF-8\">" \
+                "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" \
+                "  <title>Turing Pi RK1 - Armbian Kernel APT Repository</title>" \
+                "  <style>" \
+                "    body { font-family: sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }" \
+                "    pre  { background: #f4f4f4; padding: 1rem; border-radius: 4px; overflow-x: auto; }" \
+                "    code { background: #f4f4f4; padding: 0.2em 0.4em; border-radius: 3px; }" \
+                "  </style>" \
+                "</head>" \
+                "<body>" \
+                "  <h1>Turing Pi RK1 - Armbian Kernel APT Repository</h1>" \
+                "  <p>Automatically updated APT repository for Armbian kernel packages targeting the <a href=\"https://turingpi.com/product/turing-rk1/\">Turing Pi RK1</a> (Rockchip RK3588S). The two most recent kernel versions are always available.</p>" \
+                "  <h2>Add this repository</h2>" \
+                "  <pre>echo \"deb [trusted=yes] ${PAGES_URL} bookworm main\" | sudo tee /etc/apt/sources.list.d/turing-rk1-kernel.list" \
+                "sudo apt update</pre>" \
+                "  <h2>Install the kernel</h2>" \
+                "  <pre>sudo apt install linux-image-current-rockchip64 linux-dtb-current-rockchip64 linux-headers-current-rockchip64" \
+                "sudo reboot</pre>" \
+                "  <h2>Status</h2>" \
+                "  <ul>" \
+                "    <li><strong>Latest version:</strong> <code>${KERNEL_VERSION}</code></li>" \
+                "    <li><strong>Last updated:</strong> ${DATE}</li>" \
+                "  </ul>" \
+                "  <h2>Source</h2>" \
+                "  <p>Build scripts and userpatches: <a href=\"https://github.com/${GITHUB_REPOSITORY}\">github.com/${GITHUB_REPOSITORY}</a></p>" \
+                "</body>" \
+                "</html>" > apt-repo/index.html
+
+              for REQUIRED in \
+                apt-repo/dists/bookworm/main/binary-arm64/Packages \
+                apt-repo/dists/bookworm/main/binary-arm64/Packages.gz \
+                apt-repo/dists/bookworm/Release \
+                apt-repo/latest-kernel.txt \
+                apt-repo/index.html; do
+                [ -s "${REQUIRED}" ] || { echo "ERROR: Missing required published file: ${REQUIRED}"; exit 1; }
+              done
+
+              cd apt-repo
+              git add -A
+              if git diff --cached --quiet; then
+                echo "Nothing changed - skipping commit."
+              else
+                git commit -m "kernel ${KERNEL_VERSION}: update APT repo, keep 2 latest"
+                git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:gh-pages
+              fi
+            '

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  echo "Usage: linux-version compare <left> <op> <right> | linux-version list" >&2
+  exit 2
+}
+
+cmd="${1:-}"
+case "${cmd}" in
+  compare)
+    [ "$#" -eq 4 ] || usage
+    left="$2"
+    op="$3"
+    right="$4"
+    case "${op}" in
+      lt|le|eq|ne|ge|gt) ;;
+      *) usage ;;
+    esac
+    exec dpkg --compare-versions "${left}" "${op}" "${right}"
+    ;;
+  list)
+    if [ -d /lib/modules ]; then
+      find /lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V
+    fi
+    ;;
+  *)
+    usage
+    ;;
+esac

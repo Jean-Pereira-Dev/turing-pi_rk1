@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+import re
+import sys
+
+ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+
+sys.stdout.write(ANSI_ESCAPE_RE.sub("", sys.stdin.read()))
