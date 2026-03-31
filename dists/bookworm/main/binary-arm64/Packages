@@ -1,80 +1,80 @@
 Package: linux-dtb-current-rockchip64
-Version: 26.02.0-trunk
+Version: 26.05.0-trunk
 Architecture: arm64
 Maintainer: John Doe <john.doe@somewhere.on.planet>
-Installed-Size: 27830
+Installed-Size: 28219
 Provides: linux-dtb, linux-dtb-armbian, armbian-current
-Filename: pool/main/linux-dtb-current-rockchip64_26.02.0-trunk+k6.19.8_arm64__6.18.18-S3318-Dedd0-P4e0a-C8acb-H485c-HK01ba-Vc222-Bdc65-R448a.deb
-Size: 1035408
-MD5sum: 982ebb0751380f0f6157e502fe46e9d9
-SHA1: 0633da5bb2102f6ebcf0003e2ff891d9221d949d
-SHA256: 5f3b06d83c99970bc6d83ebfc9cf3279de4e9d7f2ae2358f78084005f7e79e1c
+Filename: pool/main/linux-dtb-current-rockchip64_26.05.0-trunk+k6.19.10_arm64__6.18.20-Sdd26-Dedd0-P96ec-C8a15-H99ff-HK01ba-Vc222-Bdc65-R448a.deb
+Size: 1056728
+MD5sum: 052110771309050efecba3db35c94da5
+SHA1: 69fef090ff0822f240edbb1bb1d16112d94626f6
+SHA256: affc48e3dfad745220e893d65fff85974bce29fcb2d0ad7bc6cd3d056b8c0025
 Section: kernel
 Priority: optional
-Description: Armbian Linux current DTBs in /boot/dtb-6.18.18-current-rockchip64
- This package contains device tree blobs from the Linux kernel, version 6.18.18-current-rockchip64
- version "6.18.18" git revision "3318f10fa28986dc5767444de585e00369c4ace3" codename "Baby Opossum Posse" drivers hash "edd05823_6ab0c5ba" patches hash "4e0a031cee8559b0" .config hash "8acb090e7a3ae4fc" .config hook hash "485c9a37c54a693f" variables hash "c22207b66dc5dd57157df2cd7b9c20559b2ed8ac44b9c3c3b9704002c06b8921" framework bash hash "dc65f79f0c4bfca6"
-Armbian-Original-Hash: 6.18.18-S3318-Dedd0-P4e0a-C8acb-H485c-HK01ba-Vc222-Bdc65-R448a
+Description: Armbian Linux current DTBs in /boot/dtb-6.18.20-current-rockchip64
+ This package contains device tree blobs from the Linux kernel, version 6.18.20-current-rockchip64
+ version "6.18.20" git revision "dd26ea937ef593a9c47aa4c85296e6b57a5344a1" codename "Baby Opossum Posse" drivers hash "edd05823_7f7ae875" patches hash "96ece12f8760f1b7" .config hash "8a1527a64bf3e653" .config hook hash "99ff0aa3ffead8e6" variables hash "c22207b66dc5dd57157df2cd7b9c20559b2ed8ac44b9c3c3b9704002c06b8921" framework bash hash "dc65f79f0c4bfca6"
+Armbian-Original-Hash: 6.18.20-Sdd26-Dedd0-P96ec-C8a15-H99ff-HK01ba-Vc222-Bdc65-R448a
 
 Package: linux-headers-current-rockchip64
-Version: 26.02.0-trunk
+Version: 26.05.0-trunk
 Architecture: arm64
 Maintainer: John Doe <john.doe@somewhere.on.planet>
-Installed-Size: 83943
+Installed-Size: 83969
 Depends: make, gcc, libc6-dev, bison, flex, libssl-dev, libelf-dev, pahole
 Provides: linux-headers, linux-headers-armbian, armbian-current
-Filename: pool/main/linux-headers-current-rockchip64_26.02.0-trunk+k6.19.8_arm64__6.18.18-S3318-Dedd0-P4e0a-C8acb-H485c-HK01ba-Vc222-Bdc65-R448a.deb
-Size: 15688864
-MD5sum: 9136b83d3a967ae8f4e97ace751f4034
-SHA1: fefec91e9ecd5855980294118eb4bc1dd3244272
-SHA256: 8480d01a940b77537ec73ab001265f893a66fa48d39906ad57ba84db177fb47c
+Filename: pool/main/linux-headers-current-rockchip64_26.05.0-trunk+k6.19.10_arm64__6.18.20-Sdd26-Dedd0-P96ec-C8a15-H99ff-HK01ba-Vc222-Bdc65-R448a.deb
+Size: 15695128
+MD5sum: 571aafaf9aa21881662b19181e9549b6
+SHA1: 81e9774cd1bbc39bc3bab420fb9cb8a69fcf14f2
+SHA256: 7f3889255703f82bdd82e4a3c19a9baf9c04d70c9159d34c8135708c3f25b2ae
 Section: devel
 Priority: optional
-Description: Armbian Linux current headers 6.18.18-current-rockchip64
- This package provides kernel header files for 6.18.18-current-rockchip64
+Description: Armbian Linux current headers 6.18.20-current-rockchip64
+ This package provides kernel header files for 6.18.20-current-rockchip64
  .
  This is useful for DKMS and building of external modules.
- version "6.18.18" git revision "3318f10fa28986dc5767444de585e00369c4ace3" codename "Baby Opossum Posse" drivers hash "edd05823_6ab0c5ba" patches hash "4e0a031cee8559b0" .config hash "8acb090e7a3ae4fc" .config hook hash "485c9a37c54a693f" variables hash "c22207b66dc5dd57157df2cd7b9c20559b2ed8ac44b9c3c3b9704002c06b8921" framework bash hash "dc65f79f0c4bfca6"
-Armbian-Original-Hash: 6.18.18-S3318-Dedd0-P4e0a-C8acb-H485c-HK01ba-Vc222-Bdc65-R448a
+ version "6.18.20" git revision "dd26ea937ef593a9c47aa4c85296e6b57a5344a1" codename "Baby Opossum Posse" drivers hash "edd05823_7f7ae875" patches hash "96ece12f8760f1b7" .config hash "8a1527a64bf3e653" .config hook hash "99ff0aa3ffead8e6" variables hash "c22207b66dc5dd57157df2cd7b9c20559b2ed8ac44b9c3c3b9704002c06b8921" framework bash hash "dc65f79f0c4bfca6"
+Armbian-Original-Hash: 6.18.20-Sdd26-Dedd0-P96ec-C8a15-H99ff-HK01ba-Vc222-Bdc65-R448a
 
 Package: linux-image-current-rockchip64
-Source: linux-6.18.18
-Version: 26.02.0-trunk
+Source: linux-6.18.20
+Version: 26.05.0-trunk
 Architecture: arm64
 Maintainer: John Doe <john.doe@somewhere.on.planet>
-Installed-Size: 300939
+Installed-Size: 301093
 Provides: linux-image, linux-image-armbian, armbian-current, wireguard-modules
-Filename: pool/main/linux-image-current-rockchip64_26.02.0-trunk+k6.19.8_arm64__6.18.18-S3318-Dedd0-P4e0a-C8acb-H485c-HK01ba-Vc222-Bdc65-R448a.deb
-Size: 51773416
-MD5sum: c9df7ed939bfca823f4fc1a1f10d4d2b
-SHA1: f37fa5cb106e0d6f0db32c9ec586f7d1058a103e
-SHA256: 6ed2ed29a3f14a12ce9bdfeadab5dd1fb33b69e3a661cc4295793af1b9d8e6f3
+Filename: pool/main/linux-image-current-rockchip64_26.05.0-trunk+k6.19.10_arm64__6.18.20-Sdd26-Dedd0-P96ec-C8a15-H99ff-HK01ba-Vc222-Bdc65-R448a.deb
+Size: 51785336
+MD5sum: 95c9a9e3a9f079e94b1dda1b24cf9f9d
+SHA1: dda1ac452b17fa2cfc887ca91e0d51adf1a43115
+SHA256: 06bc31cc2c1bed93df41e38e14e35d0743982146ef55e3a572f0b1e5a31ee689
 Section: kernel
 Priority: optional
-Description: Armbian Linux current kernel image 6.18.18-current-rockchip64
+Description: Armbian Linux current kernel image 6.18.20-current-rockchip64
  This package contains the Linux kernel, modules and corresponding other files.
- version "6.18.18" git revision "3318f10fa28986dc5767444de585e00369c4ace3" codename "Baby Opossum Posse" drivers hash "edd05823_6ab0c5ba" patches hash "4e0a031cee8559b0" .config hash "8acb090e7a3ae4fc" .config hook hash "485c9a37c54a693f" variables hash "c22207b66dc5dd57157df2cd7b9c20559b2ed8ac44b9c3c3b9704002c06b8921" framework bash hash "dc65f79f0c4bfca6"
-Armbian-Kernel-Version: 6.18.18
-Armbian-Kernel-Version-Family: 6.18.18-current-rockchip64
-Armbian-Original-Hash: 6.18.18-S3318-Dedd0-P4e0a-C8acb-H485c-HK01ba-Vc222-Bdc65-R448a
+ version "6.18.20" git revision "dd26ea937ef593a9c47aa4c85296e6b57a5344a1" codename "Baby Opossum Posse" drivers hash "edd05823_7f7ae875" patches hash "96ece12f8760f1b7" .config hash "8a1527a64bf3e653" .config hook hash "99ff0aa3ffead8e6" variables hash "c22207b66dc5dd57157df2cd7b9c20559b2ed8ac44b9c3c3b9704002c06b8921" framework bash hash "dc65f79f0c4bfca6"
+Armbian-Kernel-Version: 6.18.20
+Armbian-Kernel-Version-Family: 6.18.20-current-rockchip64
+Armbian-Original-Hash: 6.18.20-Sdd26-Dedd0-P96ec-C8a15-H99ff-HK01ba-Vc222-Bdc65-R448a
 
 Package: linux-libc-dev-current-rockchip64
-Version: 26.02.0-trunk
+Version: 26.05.0-trunk
 Architecture: arm64
 Maintainer: John Doe <john.doe@somewhere.on.planet>
 Installed-Size: 6843
 Conflicts: linux-libc-dev
 Provides: linux-libc-dev
-Filename: pool/main/linux-libc-dev-current-rockchip64_26.02.0-trunk+k6.19.8_arm64__6.18.18-S3318-Dedd0-P4e0a-C8acb-H485c-HK01ba-Vc222-Bdc65-R448a.deb
-Size: 1441380
-MD5sum: 3e6ba60aacda68baacec8e033f38bcf7
-SHA1: 702102a3072cebfccf4786c023bb684260f52ec4
-SHA256: 413bf9b79b2dd98950c56998c9276a0594994985d7919b4b24570df6cdfedaee
+Filename: pool/main/linux-libc-dev-current-rockchip64_26.05.0-trunk+k6.19.10_arm64__6.18.20-Sdd26-Dedd0-P96ec-C8a15-H99ff-HK01ba-Vc222-Bdc65-R448a.deb
+Size: 1441196
+MD5sum: 7fe154985cfce2f193a4ed51e1ea8f1a
+SHA1: b29d46e19a6e4979b6b2efefb287e3f4e428d5eb
+SHA256: d0d08d267fdc34b308da8de994ab39d7cc9f297c1d57456d329af52bbface191
 Section: devel
 Priority: optional
 Multi-Arch: same
 Description: Armbian Linux support headers for userspace development
  This package provides userspaces headers from the Linux kernel.  These headers
  are used by the installed headers for GNU glibc and other system libraries.
-Armbian-Original-Hash: 6.18.18-S3318-Dedd0-P4e0a-C8acb-H485c-HK01ba-Vc222-Bdc65-R448a
+Armbian-Original-Hash: 6.18.20-Sdd26-Dedd0-P96ec-C8a15-H99ff-HK01ba-Vc222-Bdc65-R448a
 

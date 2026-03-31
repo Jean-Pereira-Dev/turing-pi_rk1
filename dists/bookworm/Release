@@ -5,12 +5,12 @@ Codename: bookworm
 Architectures: arm64
 Components: main
 Description: Armbian kernel packages for Turing Pi RK1 (Rockchip RK3588S)
-Date: Sat, 14 Mar 2026 13:53:14 +0000
+Date: Tue, 31 Mar 2026 13:17:59 +0000
 MD5Sum:
- 35b5ae8dfcf38218127c1832342a636e 4710 main/binary-arm64/Packages
- 4df4cd13482095c54829742b32d733d2 1412 main/binary-arm64/Packages.gz
- e241e0aab32dcbc45fe4edb5814797a8 1484 main/binary-arm64/Packages.xz
+ 44b10b58cb22904bdff3aa88f7eae2c3 4714 main/binary-arm64/Packages
+ 14952b6dd96595b58d490e4ed848a0a2 1412 main/binary-arm64/Packages.gz
+ 5be2c78dd91648452bc58f1603535f40 1488 main/binary-arm64/Packages.xz
 SHA256:
- b001590064ba5a3b955785bd1839966d336d72dff74ed5d7c71b489cf476dfc6 4710 main/binary-arm64/Packages
- 58bb9cd2238196fe5fc0aef2d85cfd3fabbaa552f93acd08f142876ebf06cd55 1412 main/binary-arm64/Packages.gz
- 075716fa5f0901f5f4afbe301fa4dae9eea0c8f84260bf67357aacdfa04d5f07 1484 main/binary-arm64/Packages.xz
+ 18be6d2a1624c49eacb6a7d3cbd35ac75066b505656b46d32a56651e49e743c0 4714 main/binary-arm64/Packages
+ 6646b09c98fa3e9ab8e59704894af6a0dba448acb167441446f96ddf1a4966bd 1412 main/binary-arm64/Packages.gz
+ 4a60dc1d672d0a25da227c5fc79ea8127faf0febaea9daf063061f89684f77d1 1488 main/binary-arm64/Packages.xz
