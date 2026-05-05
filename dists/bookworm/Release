@@ -5,7 +5,7 @@ Codename: bookworm
 Architectures: arm64
 Components: main
 Description: Armbian kernel packages for Turing Pi RK1 (Rockchip RK3588S)
-Date: Tue, 21 Apr 2026 13:32:40 +0000
+Date: Tue, 05 May 2026 13:33:14 +0000
 MD5Sum:
  44b10b58cb22904bdff3aa88f7eae2c3 4714 main/binary-arm64/Packages
  14952b6dd96595b58d490e4ed848a0a2 1412 main/binary-arm64/Packages.gz
